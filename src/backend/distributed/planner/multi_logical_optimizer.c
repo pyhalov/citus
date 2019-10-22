@@ -1883,6 +1883,36 @@ MasterAggregateExpression(Aggref *originalAggregate,
 			elog(ERROR, "Aggregate lacks COMBINEFUNC");
 		}
 	}
+	else if (aggregateType == AGGREGATE_CUSTOM_COLLECT)
+	{
+		SubLink *result = NULL;
+		Query *subquery = NULL;
+		Var *column = NULL;
+
+		/* TODO newMasterAggregate */
+		Oid workerReturnType = get_array_type(linitial_oid(
+												  originalAggregate->aggargtypes));
+		int32 workerReturnTypeMod = -1;
+		Oid workerCollationId = InvalidOid;
+
+
+		column = makeVar(masterTableId, walkerContext->columnId, workerReturnType,
+						 workerReturnTypeMod, workerCollationId, columnLevelsUp);
+		walkerContext->columnId++;
+
+		subquery = makeNode(Query);
+		subquery->commandType = CMD_SELECT;
+		subquery->hasAggs = true;
+
+
+		result = makeNode(SubLink);
+		result->subLinkType = EXPR_SUBLINK;
+		result->subLinkId = 0;
+		result->operName = NIL;
+		result->subselect = (Node *) subquery;
+
+		return (Expr *) result;
+	}
 	else
 	{
 		/*
@@ -2949,6 +2979,18 @@ WorkerAggregateExpressionList(Aggref *originalAggregate,
 		{
 			elog(ERROR, "Aggregate lacks COMBINEFUNC");
 		}
+	}
+	else if (aggregateType == AGGREGATE_CUSTOM_COLLECT)
+	{
+		Aggref *workerAggregate = copyObject(originalAggregate);
+
+		if (list_length(workerAggregate->args) > 1)
+		{
+			elog(ERROR, "Support for collect aggregation limited to unary aggregates");
+		}
+
+		workerAggregate->aggfnoid = AggregateFunctionOid("array_agg", ANYARRAYOID);
+		workerAggregateList = lappend(workerAggregateList, workerAggregate);
 	}
 	else
 	{
