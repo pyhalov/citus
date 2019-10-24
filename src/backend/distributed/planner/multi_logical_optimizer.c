@@ -46,6 +46,7 @@
 #else
 #include "optimizer/var.h"
 #endif
+#include "parser/parser.h"
 #include "parser/parse_agg.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_oper.h"
@@ -65,6 +66,7 @@ typedef struct MasterAggregateWalkerContext
 {
 	AttrNumber columnId;
 	bool pullDistinctColumns;
+	bool hasSubLinks;
 } MasterAggregateWalkerContext;
 
 typedef struct WorkerAggregateWalkerContext
@@ -1428,6 +1430,7 @@ MasterExtendedOpNode(MultiExtendedOp *originalOpNode,
 	masterExtendedOpNode->limitCount = originalOpNode->limitCount;
 	masterExtendedOpNode->limitOffset = originalOpNode->limitOffset;
 	masterExtendedOpNode->havingQual = newHavingQual;
+	masterExtendedOpNode->hasSubLinks = walkerContext->hasSubLinks;
 
 	return masterExtendedOpNode;
 }
@@ -1885,31 +1888,78 @@ MasterAggregateExpression(Aggref *originalAggregate,
 	}
 	else if (aggregateType == AGGREGATE_CUSTOM_COLLECT)
 	{
-		SubLink *result = NULL;
-		Query *subquery = NULL;
+		SubLink *result = makeNode(SubLink);
+		Query *subquery = makeNode(Query);
 		Var *column = NULL;
-
-		/* TODO newMasterAggregate */
-		Oid workerReturnType = get_array_type(linitial_oid(
-												  originalAggregate->aggargtypes));
-		int32 workerReturnTypeMod = -1;
-		Oid workerCollationId = InvalidOid;
-
+		RangeTblFunction *unnestrte = makeNode(RangeTblFunction);
+		Aggref *catAggCall = makeNode(Aggref);
+		Aggref *newAggregate = makeNode(Aggref);
+		Var *newAggVar = makeNode(Var);
+		RangeTblRef *rtf1 = makeNode(RangeTblRef);
+		FuncExpr *unnest = makeNode(FuncExpr);
+		Oid arrayType = get_array_type(linitial_oid(
+										   originalAggregate->aggargtypes));
+		Oid workerReturnType = exprType((Node *) originalAggregate);
+		int32 workerReturnTypeMod = exprTypmod((Node *) originalAggregate);
+		Oid workerCollationId = exprCollation((Node *) originalAggregate);
 
 		column = makeVar(masterTableId, walkerContext->columnId, workerReturnType,
 						 workerReturnTypeMod, workerCollationId, columnLevelsUp);
 		walkerContext->columnId++;
 
-		subquery = makeNode(Query);
+		rtf1->rtindex = 1;
+
+		catAggCall->aggfnoid = AggregateFunctionOid(ARRAY_CAT_AGGREGATE_NAME,
+													ANYARRAYOID);
+		catAggCall->aggtype = arrayType;
+		catAggCall->args = list_make1(makeTargetEntry((Expr *) column, 1, NULL, false));
+		catAggCall->aggkind = AGGKIND_NORMAL;
+		catAggCall->aggtranstype = InvalidOid;
+		catAggCall->aggargtypes = list_make1_oid(catAggCall->aggtype);
+		catAggCall->aggsplit = AGGSPLIT_SIMPLE;
+
+		unnest->funcid = F_ARRAY_UNNEST;
+		unnest->funcresulttype = workerReturnType;
+		unnest->args = list_make1(catAggCall);
+
+		unnestrte->funcexpr = (Node *) unnest;
+		unnestrte->funccolcount = 1;
+
+		newAggVar->varattno = 1;
+		newAggVar->varno = 1;
+		newAggVar->vartype = originalAggregate->aggtype;
+		newAggVar->vartypmod = -1;
+		newAggVar->varcollid = InvalidOid;
+		newAggVar->location = -1;
+
+		newAggregate->aggfnoid = originalAggregate->aggfnoid;
+		newAggregate->aggcollid = originalAggregate->aggcollid;
+		newAggregate->aggtype = originalAggregate->aggtype;
+		newAggregate->aggfilter = originalAggregate->aggfilter;
+		newAggregate->aggdistinct = originalAggregate->aggdistinct;
+		newAggregate->aggsplit = originalAggregate->aggsplit;
+		newAggregate->aggtranstype = originalAggregate->aggtranstype;
+		newAggregate->aggargtypes = originalAggregate->aggargtypes;
+		newAggregate->aggorder = originalAggregate->aggorder;
+		newAggregate->aggsplit = originalAggregate->aggsplit;
+		newAggregate->aggkind = originalAggregate->aggkind;
+		newAggregate->args = list_make1(makeTargetEntry((Expr *) newAggVar, 1, NULL,
+														false));
+
 		subquery->commandType = CMD_SELECT;
 		subquery->hasAggs = true;
+		subquery->rtable = list_make1(unnestrte);
+		subquery->jointree = makeNode(FromExpr);
+		subquery->jointree->fromlist = list_make1(rtf1);
+		subquery->targetList = list_make1(makeTargetEntry((Expr *) newAggregate, 1, NULL,
+														  false));
 
-
-		result = makeNode(SubLink);
 		result->subLinkType = EXPR_SUBLINK;
 		result->subLinkId = 0;
 		result->operName = NIL;
 		result->subselect = (Node *) subquery;
+
+		walkerContext->hasSubLinks = true;
 
 		return (Expr *) result;
 	}
@@ -2986,6 +3036,7 @@ WorkerAggregateExpressionList(Aggref *originalAggregate,
 
 		if (list_length(workerAggregate->args) > 1)
 		{
+			/* We could transform agg(a, b) to array_agg((a, b)) given support for anonymous types */
 			elog(ERROR, "Support for collect aggregation limited to unary aggregates");
 		}
 

@@ -579,6 +579,7 @@ BuildJobQuery(MultiNode *multiNode, List *dependentJobList)
 	Node *limitOffset = NULL;
 	Node *havingQual = NULL;
 	bool hasDistinctOn = false;
+	bool hasSubLinks = false;
 	List *distinctClause = NIL;
 	bool isRepartitionJoin = false;
 
@@ -656,6 +657,7 @@ BuildJobQuery(MultiNode *multiNode, List *dependentJobList)
 		limitOffset = extendedOp->limitOffset;
 		sortClauseList = extendedOp->sortClauseList;
 		havingQual = extendedOp->havingQual;
+		hasSubLinks = extendedOp->hasSubLinks;
 	}
 
 	/* build group clauses */
@@ -715,6 +717,7 @@ BuildJobQuery(MultiNode *multiNode, List *dependentJobList)
 	jobQuery->hasAggs = contain_agg_clause((Node *) targetList);
 	jobQuery->distinctClause = distinctClause;
 	jobQuery->hasDistinctOn = hasDistinctOn;
+	jobQuery->hasSubLinks = hasSubLinks;
 
 	return jobQuery;
 }
