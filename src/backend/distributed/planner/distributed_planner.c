@@ -19,6 +19,7 @@
 #include "catalog/pg_type.h"
 #include "distributed/citus_nodefuncs.h"
 #include "distributed/citus_nodes.h"
+#include "distributed/cte_inline.h"
 #include "distributed/function_call_delegation.h"
 #include "distributed/insert_select_planner.h"
 #include "distributed/intermediate_result_pruning.h"
@@ -116,8 +117,8 @@ distributed_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 	bool needsDistributedPlanning = false;
 	Query *originalQuery = NULL;
 	bool setPartitionedTablesInherited = false;
-	List *rangeTableList = ExtractRangeTableEntryList(parse);
 	int rteIdCounter = 1;
+	List *rangeTableList = ExtractRangeTableEntryList(parse);
 
 	if (cursorOptions & CURSOR_OPT_FORCE_DISTRIBUTED)
 	{
@@ -159,6 +160,34 @@ distributed_planner(Query *parse, int cursorOptions, ParamListInfo boundParams)
 							errhint("Consider using CREATE TEMPORARY TABLE tmp AS "
 									"SELECT ... and inserting from the temporary "
 									"table.")));
+		}
+
+
+		/*
+		 * We might be inlining CTEs in parse tree, so get a copy otherwise we might
+		 * break prepared statements. It is not strictly necessary to copy the
+		 * parse tree even when the tree contains a CTE, because we might not
+		 * inline the CTE. However, we prefer simplicity over doing more complex
+		 * checks here, and copying the tree whenever there is at least one CTE.
+		 */
+		if (QueryTreeContainsCTE(parse))
+		{
+			parse = copyObject(parse);
+
+			/*
+			 * Inlining CTEs as subqueries in the query can avoid recursively
+			 * planning the CTEs. In other words, the inlined CTEs could become
+			 * part of query pushdown planning, which is much more efficient than
+			 * recursively planning.
+			 */
+			RecursivelyInlineCtesInQueryTree(parse);
+
+			/*
+			 * We have to pull the range table entries again, because the inlined CTEs
+			 * can be pulled up by Postgres, which could create inconsistency between
+			 * what we have in rangeTableList and the parse.
+			 */
+			rangeTableList = ExtractRangeTableEntryList(parse);
 		}
 
 		/*

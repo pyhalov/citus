@@ -35,19 +35,19 @@ WITH cte AS (
 	)
 	SELECT dist_cte.user_id FROM local_cte join dist_cte on dist_cte.user_id=local_cte.user_id
 )
-SELECT 
-	count(*) 
-FROM 
+SELECT
+	count(*)
+FROM
 	cte,
-	  (SELECT 
-    	DISTINCT users_table.user_id 
-     FROM 
-     	users_table, events_table 
-     WHERE 
-     	users_table.user_id = events_table.user_id AND 
+	  (SELECT
+    	DISTINCT users_table.user_id
+     FROM
+     	users_table, events_table
+     WHERE
+     	users_table.user_id = events_table.user_id AND
      event_type IN (1,2,3,4)
      ORDER BY 1 DESC LIMIT 5
-     ) as foo 
+     ) as foo
 	  WHERE foo.user_id = cte.user_id;
 ERROR:  server closed the connection unexpectedly
 	This probably means the server terminated abnormally
@@ -67,21 +67,21 @@ WITH cte AS (
 	dist_cte AS (
 		SELECT user_id FROM events_table
 	)
-	SELECT dist_cte.user_id FROM local_cte join dist_cte on dist_cte.user_id=local_cte.user_id
+	SELECT dist_cte.user_id FROM local_cte, dist_cte, dist_cte as prevent_cte_inline_1, local_cte prevent_cte_inline_2 WHERE dist_cte.user_id=local_cte.user_id
 )
-SELECT 
-	count(*) 
-FROM 
+SELECT
+	count(*)
+FROM
 	cte,
-	  (SELECT 
-    	DISTINCT users_table.user_id 
-     FROM 
-     	users_table, events_table 
-     WHERE 
-     	users_table.user_id = events_table.user_id AND 
+	  (SELECT
+    	DISTINCT users_table.user_id
+     FROM
+     	users_table, events_table
+     WHERE
+     	users_table.user_id = events_table.user_id AND
      event_type IN (1,2,3,4)
      ORDER BY 1 DESC LIMIT 5
-     ) as foo 
+     ) as foo
 	  WHERE foo.user_id = cte.user_id;
 ERROR:  connection error: localhost:9060
 DETAIL:  server closed the connection unexpectedly
@@ -101,21 +101,21 @@ WITH cte AS (
 	dist_cte AS (
 		SELECT user_id FROM events_table
 	)
-	SELECT dist_cte.user_id FROM local_cte join dist_cte on dist_cte.user_id=local_cte.user_id
+	SELECT dist_cte.user_id FROM local_cte, dist_cte, dist_cte as prevent_cte_inline_1, local_cte as prevent_cte_inline_2 WHERE dist_cte.user_id=local_cte.user_id
 )
-SELECT 
-	count(*) 
-FROM 
+SELECT
+	count(*)
+FROM
 	cte,
-	  (SELECT 
-    	DISTINCT users_table.user_id 
-     FROM 
-     	users_table, events_table 
-     WHERE 
-     	users_table.user_id = events_table.user_id AND 
+	  (SELECT
+    	DISTINCT users_table.user_id
+     FROM
+     	users_table, events_table
+     WHERE
+     	users_table.user_id = events_table.user_id AND
      event_type IN (1,2,3,4)
      ORDER BY 1 DESC LIMIT 5
-     ) as foo 
+     ) as foo
 	  WHERE foo.user_id = cte.user_id;
 ERROR:  connection error: localhost:9060
 DETAIL:  server closed the connection unexpectedly
@@ -137,19 +137,19 @@ WITH cte AS (
 	)
 	SELECT dist_cte.user_id FROM local_cte join dist_cte on dist_cte.user_id=local_cte.user_id
 )
-SELECT 
-	count(*) 
-FROM 
+SELECT
+	count(*)
+FROM
 	cte,
-	  (SELECT 
-    	DISTINCT users_table.user_id 
-     FROM 
-     	users_table, events_table 
-     WHERE 
-     	users_table.user_id = events_table.user_id AND 
+	  (SELECT
+    	DISTINCT users_table.user_id
+     FROM
+     	users_table, events_table
+     WHERE
+     	users_table.user_id = events_table.user_id AND
      event_type IN (1,2,3,4)
      ORDER BY 1 DESC LIMIT 5
-     ) as foo 
+     ) as foo
 	  WHERE foo.user_id = cte.user_id;
 ERROR:  canceling statement due to user request
 -- cancel at the second copy (pull)
@@ -166,21 +166,21 @@ WITH cte AS (
 	dist_cte AS (
 		SELECT user_id FROM events_table
 	)
-	SELECT dist_cte.user_id FROM local_cte join dist_cte on dist_cte.user_id=local_cte.user_id
+	SELECT dist_cte.user_id FROM local_cte, dist_cte, dist_cte as prevent_cte_inline_1, local_cte as prevent_cte_inline_2 WHERE dist_cte.user_id=local_cte.user_id
 )
-SELECT 
-	count(*) 
-FROM 
+SELECT
+	count(*)
+FROM
 	cte,
-	  (SELECT 
-    	DISTINCT users_table.user_id 
-     FROM 
-     	users_table, events_table 
-     WHERE 
-     	users_table.user_id = events_table.user_id AND 
+	  (SELECT
+    	DISTINCT users_table.user_id
+     FROM
+     	users_table, events_table
+     WHERE
+     	users_table.user_id = events_table.user_id AND
      event_type IN (1,2,3,4)
      ORDER BY 1 DESC LIMIT 5
-     ) as foo 
+     ) as foo
 	  WHERE foo.user_id = cte.user_id;
 ERROR:  canceling statement due to user request
 -- cancel at the third copy (pull)
@@ -199,19 +199,19 @@ WITH cte AS (
 	)
 	SELECT dist_cte.user_id FROM local_cte join dist_cte on dist_cte.user_id=local_cte.user_id
 )
-SELECT 
-	count(*) 
-FROM 
+SELECT
+	count(*)
+FROM
 	cte,
-	  (SELECT 
-    	DISTINCT users_table.user_id 
-     FROM 
-     	users_table, events_table 
-     WHERE 
-     	users_table.user_id = events_table.user_id AND 
+	  (SELECT
+    	DISTINCT users_table.user_id
+     FROM
+     	users_table, events_table
+     WHERE
+     	users_table.user_id = events_table.user_id AND
      event_type IN (1,2,3,4)
      ORDER BY 1 DESC LIMIT 5
-     ) as foo 
+     ) as foo
 	  WHERE foo.user_id = cte.user_id;
 ERROR:  canceling statement due to user request
 -- distributed update tests

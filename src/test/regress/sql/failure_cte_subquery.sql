@@ -50,7 +50,7 @@ WITH cte AS (
 	dist_cte AS (
 		SELECT user_id FROM events_table
 	)
-	SELECT dist_cte.user_id FROM local_cte join dist_cte on dist_cte.user_id=local_cte.user_id
+	SELECT dist_cte.user_id FROM local_cte, dist_cte, dist_cte as prevent_cte_inline_1, local_cte prevent_cte_inline_2 WHERE dist_cte.user_id=local_cte.user_id
 )
 SELECT
 	count(*)
@@ -77,7 +77,7 @@ WITH cte AS (
 	dist_cte AS (
 		SELECT user_id FROM events_table
 	)
-	SELECT dist_cte.user_id FROM local_cte join dist_cte on dist_cte.user_id=local_cte.user_id
+	SELECT dist_cte.user_id FROM local_cte, dist_cte, dist_cte as prevent_cte_inline_1, local_cte as prevent_cte_inline_2 WHERE dist_cte.user_id=local_cte.user_id
 )
 SELECT
 	count(*)
@@ -131,7 +131,7 @@ WITH cte AS (
 	dist_cte AS (
 		SELECT user_id FROM events_table
 	)
-	SELECT dist_cte.user_id FROM local_cte join dist_cte on dist_cte.user_id=local_cte.user_id
+	SELECT dist_cte.user_id FROM local_cte, dist_cte, dist_cte as prevent_cte_inline_1, local_cte as prevent_cte_inline_2 WHERE dist_cte.user_id=local_cte.user_id
 )
 SELECT
 	count(*)

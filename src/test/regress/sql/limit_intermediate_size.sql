@@ -60,13 +60,13 @@ UNION
 
 
 -- if we fetch the same amount of data at once, it should fail
-WITH cte AS (SELECT * FROM users_table WHERE user_id IN (1,2,3,4,5))
+WITH cte AS (SELECT * FROM users_table WHERE user_id IN (1,2,3,4,5) OFFSET 0)
 SELECT * FROM cte ORDER BY 1,2,3,4,5 LIMIT 10;
 
 
 SET citus.max_intermediate_result_size TO 0;
 -- this should fail
-WITH cte AS (SELECT * FROM users_table WHERE user_id=1),
+WITH cte AS (SELECT * FROM users_table WHERE user_id=1 OFFSET 0),
 cte2 AS (SELECT * FROM users_table WHERE user_id=2),
 cte3 AS (SELECT * FROM users_table WHERE user_id=3),
 cte4 AS (SELECT * FROM users_table WHERE user_id=4),
@@ -102,13 +102,13 @@ SELECT * FROM cte WHERE EXISTS (select * from cte);
 
 SET citus.max_intermediate_result_size TO 3;
 -- this should fail since the cte-subplan exceeds the limit even if the
--- cte2 and cte3 does not
+-- cte2 and cte3 does not (and prevent CTE inlining)
 WITH cte AS (
 	WITH cte2 AS (
-		SELECT * FROM users_table WHERE user_id IN (3,4,5,6)
+		SELECT * FROM users_table WHERE user_id IN (3,4,5,6) OFFSET 0
 	),
 	cte3 AS (
-		SELECT * FROM events_table WHERE event_type = 1
+		SELECT * FROM events_table WHERE event_type = 1 OFFSET 0
 	)
 	SELECT * FROM cte2, cte3 WHERE cte2.value_1 IN (SELECT value_2 FROM cte3)
 )
