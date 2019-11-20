@@ -580,6 +580,16 @@ static TaskPlacementExecution * PopUnassignedPlacementExecution(WorkerPool *work
 static bool StartPlacementExecutionOnSession(TaskPlacementExecution *placementExecution,
 											 WorkerSession *session);
 static void ConnectionStateMachine(WorkerSession *session);
+static void HandleMultiConnectionFailed(WorkerPool *workerPool,
+										MultiConnection *connection,
+										WorkerSession *session,
+										DistributedExecution *execution);
+static void HandleMultiConnectionConnecting(WorkerPool *workerPool,
+											MultiConnection *connection,
+											WorkerSession *session);
+static void HandleMultiConnectionSuccess(WorkerPool *workerPool,
+										 MultiConnection *connection,
+										 WorkerSession *session);
 static void Activate2PCIfModifyingTransactionExpandsToNewNode(WorkerSession *session);
 static bool TransactionModifiedDistributedTable(DistributedExecution *execution);
 static void TransactionStateMachine(WorkerSession *session);
@@ -2347,60 +2357,7 @@ ConnectionStateMachine(WorkerSession *session)
 
 			case MULTI_CONNECTION_CONNECTING:
 			{
-				PostgresPollingStatusType pollMode;
-
-				ConnStatusType status = PQstatus(connection->pgConn);
-				if (status == CONNECTION_OK)
-				{
-					ereport(DEBUG4, (errmsg("established connection to %s:%d for "
-											"session %ld",
-											connection->hostname, connection->port,
-											session->sessionId)));
-
-					workerPool->activeConnectionCount++;
-					workerPool->idleConnectionCount++;
-
-					UpdateConnectionWaitFlags(session,
-											  WL_SOCKET_READABLE | WL_SOCKET_WRITEABLE);
-
-					connection->connectionState = MULTI_CONNECTION_CONNECTED;
-					break;
-				}
-				else if (status == CONNECTION_BAD)
-				{
-					connection->connectionState = MULTI_CONNECTION_FAILED;
-					break;
-				}
-
-				pollMode = PQconnectPoll(connection->pgConn);
-				if (pollMode == PGRES_POLLING_FAILED)
-				{
-					connection->connectionState = MULTI_CONNECTION_FAILED;
-				}
-				else if (pollMode == PGRES_POLLING_READING)
-				{
-					UpdateConnectionWaitFlags(session, WL_SOCKET_READABLE);
-				}
-				else if (pollMode == PGRES_POLLING_WRITING)
-				{
-					UpdateConnectionWaitFlags(session, WL_SOCKET_WRITEABLE);
-				}
-				else
-				{
-					ereport(DEBUG4, (errmsg("established connection to %s:%d for "
-											"session %ld",
-											connection->hostname, connection->port,
-											session->sessionId)));
-
-					workerPool->activeConnectionCount++;
-					workerPool->idleConnectionCount++;
-
-					UpdateConnectionWaitFlags(session,
-											  WL_SOCKET_READABLE | WL_SOCKET_WRITEABLE);
-
-					connection->connectionState = MULTI_CONNECTION_CONNECTED;
-				}
-
+				HandleMultiConnectionConnecting(workerPool, connection, session);
 				break;
 			}
 
@@ -2428,73 +2385,7 @@ ConnectionStateMachine(WorkerSession *session)
 
 			case MULTI_CONNECTION_FAILED:
 			{
-				/* connection failed or was lost */
-				int totalConnectionCount = list_length(workerPool->sessionList);
-
-				workerPool->failedConnectionCount++;
-
-				/* if the connection executed a critical command it should fail */
-				MarkRemoteTransactionFailed(connection, false);
-
-				/* mark all assigned placement executions as failed */
-				WorkerSessionFailed(session);
-
-				if (workerPool->failedConnectionCount >= totalConnectionCount)
-				{
-					/*
-					 * All current connection attempts have failed.
-					 * Mark all unassigned placement executions as failed.
-					 *
-					 * We do not currently retry if the first connection
-					 * attempt fails.
-					 */
-					WorkerPoolFailed(workerPool);
-				}
-
-				/*
-				 * The execution may have failed as a result of WorkerSessionFailed
-				 * or WorkerPoolFailed.
-				 */
-				if (execution->failed || execution->errorOnAnyFailure)
-				{
-					/* a task has failed due to this connection failure */
-					ReportConnectionError(connection, ERROR);
-				}
-				else
-				{
-					/* can continue with the remaining nodes */
-					ReportConnectionError(connection, WARNING);
-				}
-
-				/* remove the connection */
-				UnclaimConnection(connection);
-
-				/*
-				 * We forcefully close the underlying libpq connection because
-				 * we don't want any subsequent execution (either subPlan executions
-				 * or new command executions within a transaction block) use the
-				 * connection.
-				 *
-				 * However, we prefer to keep the MultiConnection around until
-				 * the end of FinishDistributedExecution() to simplify the code.
-				 * Thus, we prefer ShutdownConnection() over CloseConnection().
-				 */
-				ShutdownConnection(connection);
-
-				/* remove connection from wait event set */
-				execution->connectionSetChanged = true;
-
-				/*
-				 * Reset the transaction state machine since CloseConnection()
-				 * relies on it and even if we're not inside a distributed transaction
-				 * we set the transaction state (e.g., REMOTE_TRANS_SENT_COMMAND).
-				 */
-				if (!connection->remoteTransaction.beginSent)
-				{
-					connection->remoteTransaction.transactionState =
-						REMOTE_TRANS_INVALID;
-				}
-
+				HandleMultiConnectionFailed(workerPool, connection, session, execution);
 				break;
 			}
 
@@ -2504,6 +2395,145 @@ ConnectionStateMachine(WorkerSession *session)
 			}
 		}
 	} while (connection->connectionState != currentState);
+}
+
+
+/*
+ * HandleMultiConnectionConnecting checks the connection status to see if it is succesful
+ * or not. If it is not okay or bad yet, it checks PQconnectPoll to move to the next state.
+ */
+static void
+HandleMultiConnectionConnecting(WorkerPool *workerPool, MultiConnection *connection,
+								WorkerSession *session)
+{
+	PostgresPollingStatusType pollMode;
+
+	ConnStatusType status = PQstatus(connection->pgConn);
+	if (status == CONNECTION_OK)
+	{
+		HandleMultiConnectionSuccess(workerPool, connection, session);
+		return;
+	}
+	else if (status == CONNECTION_BAD)
+	{
+		connection->connectionState = MULTI_CONNECTION_FAILED;
+		return;
+	}
+
+	pollMode = PQconnectPoll(connection->pgConn);
+	if (pollMode == PGRES_POLLING_FAILED)
+	{
+		connection->connectionState = MULTI_CONNECTION_FAILED;
+	}
+	else if (pollMode == PGRES_POLLING_READING)
+	{
+		UpdateConnectionWaitFlags(session, WL_SOCKET_READABLE);
+	}
+	else if (pollMode == PGRES_POLLING_WRITING)
+	{
+		UpdateConnectionWaitFlags(session, WL_SOCKET_WRITEABLE);
+	}
+	else
+	{
+		HandleMultiConnectionSuccess(workerPool, connection, session);
+	}
+}
+
+
+/*
+ * HandleMultiConnectionSuccess logs the established connection and updates connection's state.
+ */
+static void
+HandleMultiConnectionSuccess(WorkerPool *workerPool, MultiConnection *connection,
+							 WorkerSession *session)
+{
+	ereport(DEBUG4, (errmsg("established connection to %s:%d for "
+							"session %ld",
+							connection->hostname, connection->port,
+							session->sessionId)));
+
+	workerPool->activeConnectionCount++;
+	workerPool->idleConnectionCount++;
+
+	UpdateConnectionWaitFlags(session,
+							  WL_SOCKET_READABLE | WL_SOCKET_WRITEABLE);
+
+	connection->connectionState = MULTI_CONNECTION_CONNECTED;
+}
+
+
+/*
+ * HandleMultiConnectionFailed handles the case where connection was failed or was lost.
+ */
+static void
+HandleMultiConnectionFailed(WorkerPool *workerPool, MultiConnection *connection,
+							WorkerSession *session, DistributedExecution *execution)
+{
+	int totalConnectionCount = list_length(workerPool->sessionList);
+
+	workerPool->failedConnectionCount++;
+
+	/* if the connection executed a critical command it should fail */
+	MarkRemoteTransactionFailed(connection, false);
+
+	/* mark all assigned placement executions as failed */
+	WorkerSessionFailed(session);
+
+	if (workerPool->failedConnectionCount >= totalConnectionCount)
+	{
+		/*
+		 * All current connection attempts have failed.
+		 * Mark all unassigned placement executions as failed.
+		 *
+		 * We do not currently retry if the first connection
+		 * attempt fails.
+		 */
+		WorkerPoolFailed(workerPool);
+	}
+
+	/*
+	 * The execution may have failed as a result of WorkerSessionFailed
+	 * or WorkerPoolFailed.
+	 */
+	if (execution->failed || execution->errorOnAnyFailure)
+	{
+		/* a task has failed due to this connection failure */
+		ReportConnectionError(connection, ERROR);
+	}
+	else
+	{
+		/* can continue with the remaining nodes */
+		ReportConnectionError(connection, WARNING);
+	}
+
+	/* remove the connection */
+	UnclaimConnection(connection);
+
+	/*
+	 * We forcefully close the underlying libpq connection because
+	 * we don't want any subsequent execution (either subPlan executions
+	 * or new command executions within a transaction block) use the
+	 * connection.
+	 *
+	 * However, we prefer to keep the MultiConnection around until
+	 * the end of FinishDistributedExecution() to simplify the code.
+	 * Thus, we prefer ShutdownConnection() over CloseConnection().
+	 */
+	ShutdownConnection(connection);
+
+	/* remove connection from wait event set */
+	execution->connectionSetChanged = true;
+
+	/*
+	 * Reset the transaction state machine since CloseConnection()
+	 * relies on it and even if we're not inside a distributed transaction
+	 * we set the transaction state (e.g., REMOTE_TRANS_SENT_COMMAND).
+	 */
+	if (!connection->remoteTransaction.beginSent)
+	{
+		connection->remoteTransaction.transactionState =
+			REMOTE_TRANS_INVALID;
+	}
 }
 
 
