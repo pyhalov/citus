@@ -104,21 +104,20 @@ QualifyCollationName(List *name)
 	if (schemaName == NULL)
 	{
 		Oid collid = get_collation_oid(name, true);
-		HeapTuple colltup = NULL;
-		Form_pg_collation collationForm;
 
 		if (collid == InvalidOid)
 		{
 			return (Node *) name;
 		}
 
-		colltup = SearchSysCache1(COLLOID, collid);
+		HeapTuple colltup = SearchSysCache1(COLLOID, collid);
 
 		if (!HeapTupleIsValid(colltup))
 		{
 			return (Node *) name;
 		}
-		collationForm = (Form_pg_collation) GETSTRUCT(colltup);
+		Form_pg_collation collationForm =
+			(Form_pg_collation) GETSTRUCT(colltup);
 
 		schemaName = get_namespace_name(collationForm->collnamespace);
 		collationName = NameStr(collationForm->collname);

@@ -223,12 +223,8 @@ PlanDropCollationStmt(DropStmt *stmt)
 	 * We swap the list of objects to remove during deparse so we need a reference back to
 	 * the old list to put back
 	 */
-	List *oldCollations = NIL;
-	List *distributedCollations = NIL;
-	const char *dropStmtSql = NULL;
 	ListCell *addressCell = NULL;
 	List *distributedTypeAddresses = NIL;
-	List *commands = NIL;
 
 	if (!ShouldPropagate())
 	{
@@ -236,12 +232,11 @@ PlanDropCollationStmt(DropStmt *stmt)
 	}
 
 	QualifyTreeNode((Node *) stmt);
-	oldCollations = stmt->objects;
 
-	distributedCollations = FilterNameListForDistributedCollations(oldCollations,
-																   stmt->missing_ok,
-																   &
-																   distributedTypeAddresses);
+	List *oldCollations = stmt->objects;
+	List *distributedCollations =
+		FilterNameListForDistributedCollations(oldCollations, stmt->missing_ok,
+											   &distributedTypeAddresses);
 	if (list_length(distributedCollations) <= 0)
 	{
 		/* no distributed types to drop */
@@ -269,15 +264,15 @@ PlanDropCollationStmt(DropStmt *stmt)
 	 * deparse to an executable sql statement for the workers
 	 */
 	stmt->objects = distributedCollations;
-	dropStmtSql = DeparseTreeNode((Node *) stmt);
+	char *dropStmtSql = DeparseTreeNode((Node *) stmt);
 	stmt->objects = oldCollations;
 
 	/* to prevent recursion with mx we disable ddl propagation */
 	EnsureSequentialModeForCollationDDL();
 
-	commands = list_make3(DISABLE_DDL_PROPAGATION,
-						  (void *) dropStmtSql,
-						  ENABLE_DDL_PROPAGATION);
+	List *commands = list_make3(DISABLE_DDL_PROPAGATION,
+								(void *) dropStmtSql,
+								ENABLE_DDL_PROPAGATION);
 
 	return NodeDDLTaskList(ALL_WORKERS, commands);
 }
@@ -293,14 +288,10 @@ PlanDropCollationStmt(DropStmt *stmt)
 List *
 PlanAlterCollationOwnerStmt(AlterOwnerStmt *stmt, const char *queryString)
 {
-	const ObjectAddress *typeAddress = NULL;
-	const char *sql = NULL;
-	List *commands = NULL;
-
 	Assert(stmt->objectType == OBJECT_TYPE);
 
-	typeAddress = GetObjectAddressFromParseTree((Node *) stmt, false);
-	if (!ShouldPropagateObject(typeAddress))
+	ObjectAddress *collationAddress = GetObjectAddressFromParseTree((Node *) stmt, false);
+	if (!ShouldPropagateObject(collationAddress))
 	{
 		return NIL;
 	}
@@ -308,12 +299,12 @@ PlanAlterCollationOwnerStmt(AlterOwnerStmt *stmt, const char *queryString)
 	EnsureCoordinator();
 
 	QualifyTreeNode((Node *) stmt);
-	sql = DeparseTreeNode((Node *) stmt);
+	char *sql = DeparseTreeNode((Node *) stmt);
 
 	EnsureSequentialModeForCollationDDL();
-	commands = list_make3(DISABLE_DDL_PROPAGATION,
-						  (void *) sql,
-						  ENABLE_DDL_PROPAGATION);
+	List *commands = list_make3(DISABLE_DDL_PROPAGATION,
+								(void *) sql,
+								ENABLE_DDL_PROPAGATION);
 
 	return NodeDDLTaskList(ALL_WORKERS, commands);
 }
@@ -330,12 +321,8 @@ PlanAlterCollationOwnerStmt(AlterOwnerStmt *stmt, const char *queryString)
 List *
 PlanRenameCollationStmt(RenameStmt *stmt, const char *queryString)
 {
-	const char *renameStmtSql = NULL;
-	const ObjectAddress *typeAddress = NULL;
-	List *commands = NIL;
-
-	typeAddress = GetObjectAddressFromParseTree((Node *) stmt, false);
-	if (!ShouldPropagateObject(typeAddress))
+	ObjectAddress *collationAddress = GetObjectAddressFromParseTree((Node *) stmt, false);
+	if (!ShouldPropagateObject(collationAddress))
 	{
 		return NIL;
 	}
@@ -344,14 +331,14 @@ PlanRenameCollationStmt(RenameStmt *stmt, const char *queryString)
 	QualifyTreeNode((Node *) stmt);
 
 	/* deparse sql*/
-	renameStmtSql = DeparseTreeNode((Node *) stmt);
+	char *renameStmtSql = DeparseTreeNode((Node *) stmt);
 
 	/* to prevent recursion with mx we disable ddl propagation */
 	EnsureSequentialModeForCollationDDL();
 
-	commands = list_make3(DISABLE_DDL_PROPAGATION,
-						  (void *) renameStmtSql,
-						  ENABLE_DDL_PROPAGATION);
+	List *commands = list_make3(DISABLE_DDL_PROPAGATION,
+								(void *) renameStmtSql,
+								ENABLE_DDL_PROPAGATION);
 
 	return NodeDDLTaskList(ALL_WORKERS, commands);
 }
@@ -366,13 +353,9 @@ PlanRenameCollationStmt(RenameStmt *stmt, const char *queryString)
 List *
 PlanAlterCollationSchemaStmt(AlterObjectSchemaStmt *stmt, const char *queryString)
 {
-	const char *sql = NULL;
-	const ObjectAddress *collationAddress = NULL;
-	List *commands = NIL;
-
 	Assert(stmt->objectType == OBJECT_COLLATION);
 
-	collationAddress = GetObjectAddressFromParseTree((Node *) stmt, false);
+	ObjectAddress *collationAddress = GetObjectAddressFromParseTree((Node *) stmt, false);
 	if (!ShouldPropagateObject(collationAddress))
 	{
 		return NIL;
@@ -381,13 +364,13 @@ PlanAlterCollationSchemaStmt(AlterObjectSchemaStmt *stmt, const char *queryStrin
 	EnsureCoordinator();
 
 	QualifyTreeNode((Node *) stmt);
-	sql = DeparseTreeNode((Node *) stmt);
+	char *sql = DeparseTreeNode((Node *) stmt);
 
 	EnsureSequentialModeForCollationDDL();
 
-	commands = list_make3(DISABLE_DDL_PROPAGATION,
-						  (void *) sql,
-						  ENABLE_DDL_PROPAGATION);
+	List *commands = list_make3(DISABLE_DDL_PROPAGATION,
+								(void *) sql,
+								ENABLE_DDL_PROPAGATION);
 
 	return NodeDDLTaskList(ALL_WORKERS, commands);
 }
@@ -401,11 +384,9 @@ PlanAlterCollationSchemaStmt(AlterObjectSchemaStmt *stmt, const char *queryStrin
 void
 ProcessAlterCollationSchemaStmt(AlterObjectSchemaStmt *stmt, const char *queryString)
 {
-	const ObjectAddress *collationAddress = NULL;
-
 	Assert(stmt->objectType == OBJECT_COLLATION);
 
-	collationAddress = GetObjectAddressFromParseTree((Node *) stmt, false);
+	ObjectAddress *collationAddress = GetObjectAddressFromParseTree((Node *) stmt, false);
 	if (!ShouldPropagateObject(collationAddress))
 	{
 		return;
@@ -423,13 +404,10 @@ ProcessAlterCollationSchemaStmt(AlterObjectSchemaStmt *stmt, const char *querySt
 ObjectAddress *
 RenameCollationStmtObjectAddress(RenameStmt *stmt, bool missing_ok)
 {
-	ObjectAddress *address = NULL;
-	Oid collationOid = InvalidOid;
-
 	Assert(stmt->renameType == OBJECT_COLLATION);
 
-	address = palloc0(sizeof(ObjectAddress));
-	collationOid = get_collation_oid((List *) stmt->object, missing_ok);
+	ObjectAddress *address = palloc0(sizeof(ObjectAddress));
+	Oid collationOid = get_collation_oid((List *) stmt->object, missing_ok);
 
 	ObjectAddressSet(*address, CollationRelationId, collationOid);
 	return address;
@@ -448,13 +426,10 @@ RenameCollationStmtObjectAddress(RenameStmt *stmt, bool missing_ok)
 ObjectAddress *
 AlterCollationSchemaStmtObjectAddress(AlterObjectSchemaStmt *stmt, bool missing_ok)
 {
-	ObjectAddress *address = NULL;
-	Oid collationOid = InvalidOid;
-	List *name = (List *) stmt->object;
-
 	Assert(stmt->objectType == OBJECT_COLLATION);
 
-	collationOid = get_collation_oid(name, true);
+	List *name = (List *) stmt->object;
+	Oid collationOid = get_collation_oid(name, true);
 
 	if (collationOid == InvalidOid)
 	{
@@ -470,7 +445,7 @@ AlterCollationSchemaStmtObjectAddress(AlterObjectSchemaStmt *stmt, bool missing_
 		}
 	}
 
-	address = palloc0(sizeof(ObjectAddress));
+	ObjectAddress *address = palloc0(sizeof(ObjectAddress));
 	ObjectAddressSet(*address, CollationRelationId, collationOid);
 	return address;
 }
@@ -528,27 +503,23 @@ GenerateBackupNameForCollationCollision(const ObjectAddress *address)
 	char *newName = palloc0(NAMEDATALEN);
 	char suffix[NAMEDATALEN] = { 0 };
 	int count = 0;
-	Value *namespace = NULL;
 	char *baseName = get_collation_name(address->objectId);
 	int baseLength = strlen(baseName);
 	HeapTuple collationTuple = SearchSysCache1(COLLOID, address->objectId);
-	Form_pg_collation collationForm;
 
 	if (!HeapTupleIsValid(collationTuple))
 	{
 		elog(ERROR, "citus cache lookup failed");
 		return NULL;
 	}
-	collationForm = (Form_pg_collation) GETSTRUCT(collationTuple);
-	namespace = makeString(get_namespace_name(collationForm->collnamespace));
+	Form_pg_collation collationForm = (Form_pg_collation) GETSTRUCT(collationTuple);
+	Value *namespace = makeString(get_namespace_name(collationForm->collnamespace));
 	ReleaseSysCache(collationTuple);
 
 	while (true)
 	{
 		int suffixLength = snprintf(suffix, NAMEDATALEN - 1, "(citus_backup_%d)",
 									count);
-		List *newCollationName = NIL;
-		Oid existingCollationId = InvalidOid;
 
 		/* trim the base name at the end to leave space for the suffix and trailing \0 */
 		baseLength = Min(baseLength, NAMEDATALEN - suffixLength - 1);
@@ -558,10 +529,10 @@ GenerateBackupNameForCollationCollision(const ObjectAddress *address)
 		strncpy(newName, baseName, baseLength);
 		strncpy(newName + baseLength, suffix, suffixLength);
 
-		newCollationName = list_make2(namespace, makeString(newName));
+		List *newCollationName = list_make2(namespace, makeString(newName));
 
 		/* don't need to rename if the input arguments don't match */
-		existingCollationId = get_collation_oid(newCollationName, true);
+		Oid existingCollationId = get_collation_oid(newCollationName, true);
 
 		if (existingCollationId == InvalidOid)
 		{

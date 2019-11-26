@@ -117,11 +117,9 @@ DeparseAlterCollationSchemaStmt(AlterObjectSchemaStmt *stmt)
 static void
 AppendAlterCollationSchemaStmt(StringInfo buf, AlterObjectSchemaStmt *stmt)
 {
-	List *names = NIL;
-
 	Assert(stmt->objectType == OBJECT_COLLATION);
 
-	names = (List *) stmt->object;
+	List *names = (List *) stmt->object;
 	appendStringInfo(buf, "ALTER COLLATION %s SET SCHEMA %s;", NameListToQuotedString(
 						 names),
 					 quote_identifier(stmt->newschema));
@@ -151,11 +149,9 @@ DeparseAlterCollationOwnerStmt(AlterOwnerStmt *stmt)
 static void
 AppendAlterCollationOwnerStmt(StringInfo buf, AlterOwnerStmt *stmt)
 {
-	List *names = NIL;
-
 	Assert(stmt->objectType == OBJECT_COLLATION);
 
-	names = (List *) stmt->object;
+	List *names = (List *) stmt->object;
 	appendStringInfo(buf, "ALTER COLLATION %s OWNER TO %s;", NameListToQuotedString(
 						 names),
 					 RoleSpecString(stmt->newowner, true));

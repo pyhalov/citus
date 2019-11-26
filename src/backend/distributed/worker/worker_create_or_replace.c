@@ -206,24 +206,19 @@ CreateRenameCollationStmt(const ObjectAddress *address, char *newName)
 {
 	RenameStmt *stmt = makeNode(RenameStmt);
 	Oid collid = address->objectId;
-	HeapTuple colltup = NULL;
-	Form_pg_collation collationForm;
-	char *schemaName = NULL;
-	char *collationName = NULL;
-	List *name = NIL;
 
-	colltup = SearchSysCache1(COLLOID, collid);
-
+	HeapTuple colltup = SearchSysCache1(COLLOID, collid);
 	if (!HeapTupleIsValid(colltup))
 	{
 		elog(ERROR, "citus cache lookup error");
 		return NULL;
 	}
-	collationForm = (Form_pg_collation) GETSTRUCT(colltup);
+	Form_pg_collation collationForm =
+		(Form_pg_collation) GETSTRUCT(colltup);
 
-	schemaName = get_namespace_name(collationForm->collnamespace);
-	collationName = NameStr(collationForm->collname);
-	name = list_make2(makeString(schemaName), makeString(collationName));
+	char *schemaName = get_namespace_name(collationForm->collnamespace);
+	char *collationName = NameStr(collationForm->collname);
+	List *name = list_make2(makeString(schemaName), makeString(collationName));
 	ReleaseSysCache(colltup);
 
 	stmt->renameType = OBJECT_COLLATION;
