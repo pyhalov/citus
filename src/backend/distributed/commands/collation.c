@@ -288,7 +288,7 @@ PlanDropCollationStmt(DropStmt *stmt)
 List *
 PlanAlterCollationOwnerStmt(AlterOwnerStmt *stmt, const char *queryString)
 {
-	Assert(stmt->objectType == OBJECT_TYPE);
+	Assert(stmt->objectType == OBJECT_COLLATION);
 
 	ObjectAddress *collationAddress = GetObjectAddressFromParseTree((Node *) stmt, false);
 	if (!ShouldPropagateObject(collationAddress))
