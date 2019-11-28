@@ -753,6 +753,16 @@ multi_ProcessUtility(PlannedStmt *pstmt,
 			ProcessCreateEnumStmt(castNode(CreateEnumStmt, parsetree), queryString);
 		}
 
+		if (IsA(parsetree, DefineStmt))
+		{
+			DefineStmt *defineStmt = castNode(DefineStmt, parsetree);
+
+			if (defineStmt->kind == OBJECT_COLLATION)
+			{
+				ddlJobs = ProcessCollationDefineStmt(defineStmt, queryString);
+			}
+		}
+
 		if (IsA(parsetree, AlterObjectSchemaStmt))
 		{
 			ProcessAlterObjectSchemaStmt(castNode(AlterObjectSchemaStmt, parsetree),

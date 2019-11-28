@@ -45,6 +45,7 @@ extern void ProcessAlterCollationSchemaStmt(AlterObjectSchemaStmt *stmt,
 extern char * GenerateBackupNameForCollationCollision(const ObjectAddress *address);
 extern ObjectAddress * DefineCollationStmtObjectAddress(DefineStmt *stmt, bool
 														missing_ok);
+extern List * ProcessCollationDefineStmt(DefineStmt *stmt, const char *queryString);
 
 /* extension.c - forward declarations */
 extern bool IsCreateAlterExtensionUpdateCitusStmt(Node *parsetree);

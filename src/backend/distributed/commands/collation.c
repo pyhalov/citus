@@ -392,7 +392,7 @@ ProcessAlterCollationSchemaStmt(AlterObjectSchemaStmt *stmt, const char *querySt
 		return;
 	}
 
-	/* dependencies have changed (schema) lets ensure they exist */
+	/* dependencies have changed (schema) let's ensure they exist */
 	EnsureDependenciesExistsOnAllNodes(collationAddress);
 }
 
@@ -547,10 +547,55 @@ GenerateBackupNameForCollationCollision(const ObjectAddress *address)
 ObjectAddress *
 DefineCollationStmtObjectAddress(DefineStmt *stmt, bool missing_ok)
 {
+	Assert(stmt->kind == OBJECT_COLLATION);
+
 	Oid collOid = get_collation_oid(stmt->defnames, missing_ok);
 	ObjectAddress *address = palloc0(sizeof(ObjectAddress));
 
 	ObjectAddressSet(*address, CollationRelationId, collOid);
 
 	return address;
+}
+
+
+/*
+ * ProcessCollationDefineStmt executed after the extension has been
+ * created locally and before we create it on the worker nodes.
+ * As we now have access to ObjectAddress of the extension that is just
+ * created, we can mark it as distributed to make sure that its
+ * dependencies exist on all nodes.
+ */
+List *
+ProcessCollationDefineStmt(DefineStmt *stmt, const char *queryString)
+{
+	Assert(stmt->kind == OBJECT_COLLATION);
+
+	if (!ShouldPropagate())
+	{
+		return NIL;
+	}
+
+	/*
+	 * If the create collation command is a part of a multi-statement transaction,
+	 * do not propagate it
+	 */
+	if (IsMultiStatementTransaction())
+	{
+		return NIL;
+	}
+
+	ObjectAddress *collationAddress =
+		DefineCollationStmtObjectAddress(stmt, false);
+
+	if (collationAddress->objectId == InvalidOid)
+	{
+		return NIL;
+	}
+
+	EnsureDependenciesExistsOnAllNodes(collationAddress);
+
+	MarkObjectDistributed(collationAddress);
+
+	return NodeDDLTaskList(ALL_WORKERS, CreateCollationDDLsIdempotent(
+							   collationAddress->objectId));
 }

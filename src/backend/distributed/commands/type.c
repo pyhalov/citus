@@ -618,7 +618,7 @@ ProcessAlterTypeSchemaStmt(AlterObjectSchemaStmt *stmt, const char *queryString)
 		return;
 	}
 
-	/* dependencies have changed (schema) lets ensure they exist */
+	/* dependencies have changed (schema) let's ensure they exist */
 	EnsureDependenciesExistsOnAllNodes(typeAddress);
 }
 

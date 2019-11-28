@@ -23,9 +23,10 @@ JOIN pg_namespace nsp ON nsp.oid = c.collnamespace
 JOIN pg_authid a ON a.oid = c.collowner
 WHERE collname like 'german_phonebook%'
 ORDER BY 1,2,3;
- collname | nspname | rolname 
-----------+---------+---------
-(0 rows)
+     collname     |     nspname     | rolname  
+------------------+-----------------+----------
+ german_phonebook | collation_tests | postgres
+(1 row)
 
 \c - - - :master_port
 SET search_path to collation_tests;

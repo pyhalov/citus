@@ -210,7 +210,7 @@ recurse_pg_depend(const ObjectAddress *target,
 	relation_close(depRel, AccessShareLock);
 
 	/*
-	 * concat expended entries if applicable
+	 * concat expanded entries if applicable
 	 */
 	if (expand != NULL)
 	{
