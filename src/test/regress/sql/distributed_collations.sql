@@ -8,17 +8,11 @@ CREATE SCHEMA collation_tests2 AUTHORIZATION collationuser;
 
 SET search_path to collation_tests;
 
-CREATE COLLATION case_insensitive (
-	provider = icu,
-	locale = 'und-u-ks-level2'
-);
+CREATE COLLATION german_phonebook (provider = icu, locale = 'de-u-co-phonebk');
 
 SET citus.enable_ddl_propagation TO off;
 
-CREATE COLLATION case_insensitive_unpropagated (
-	provider = icu,
-	locale = 'und-u-ks-level2'
-);
+CREATE COLLATION german_phonebook_unpropagated (provider = icu, locale = 'de-u-co-phonebk');
 
 SET citus.enable_ddl_propagation TO on;
 
@@ -27,35 +21,39 @@ SELECT c.collname, nsp.nspname, a.rolname
 FROM pg_collation c
 JOIN pg_namespace nsp ON nsp.oid = c.collnamespace
 JOIN pg_authid a ON a.oid = c.collowner
-WHERE collname like 'case_insensitive%'
+WHERE collname like 'german_phonebook%'
 ORDER BY 1,2,3;
 \c - - - :master_port
 SET search_path to collation_tests;
 
-CREATE TABLE test_propagate(id int, t1 text COLLATE case_insensitive,
-    t2 text COLLATE case_insensitive_unpropagated);
-INSERT INTO test_propagate VALUES (1, 'a', 's'), (2, 'd', 'f');
+CREATE TABLE test_propagate(id int, t1 text COLLATE german_phonebook,
+    t2 text COLLATE german_phonebook_unpropagated);
+INSERT INTO test_propagate VALUES (1, 'aesop', U&'\00E4sop'), (2, U&'Vo\1E9Er', 'Vossr');
 SELECT create_distributed_table('test_propagate', 'id');
+
+-- Test COLLATE is pushed down
+SELECT * FROM collation_tests.test_propagate WHERE t2 < 'b';
+SELECT * FROM collation_tests.test_propagate WHERE t2 < 'b' COLLATE "C";
 
 \c - - - :worker_1_port
 SELECT c.collname, nsp.nspname, a.rolname
 FROM pg_collation c
 JOIN pg_namespace nsp ON nsp.oid = c.collnamespace
 JOIN pg_authid a ON a.oid = c.collowner
-WHERE collname like 'case_insensitive%'
+WHERE collname like 'german_phonebook%'
 ORDER BY 1,2,3;
 \c - - - :master_port
 
-ALTER COLLATION collation_tests.case_insensitive RENAME TO case_insensitive2;
-ALTER COLLATION collation_tests.case_insensitive2 SET SCHEMA collation_tests2;
-ALTER COLLATION collation_tests2.case_insensitive2 OWNER TO collationuser;
+ALTER COLLATION collation_tests.german_phonebook RENAME TO german_phonebook2;
+ALTER COLLATION collation_tests.german_phonebook2 SET SCHEMA collation_tests2;
+ALTER COLLATION collation_tests2.german_phonebook2 OWNER TO collationuser;
 
 \c - - - :worker_1_port
 SELECT c.collname, nsp.nspname, a.rolname
 FROM pg_collation c
 JOIN pg_namespace nsp ON nsp.oid = c.collnamespace
 JOIN pg_authid a ON a.oid = c.collowner
-WHERE collname like 'case_insensitive%'
+WHERE collname like 'german_phonebook%'
 ORDER BY 1,2,3;
 \c - - - :master_port
 
