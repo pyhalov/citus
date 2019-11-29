@@ -1822,7 +1822,7 @@ MasterAggregateExpression(Aggref *originalAggregate,
 
 		newMasterExpression = (Expr *) unionAggregate;
 	}
-	else if (aggregateType == AGGREGATE_CUSTOM)
+	else if (aggregateType == AGGREGATE_CUSTOM_COMBINE)
 	{
 		HeapTuple aggTuple = SearchSysCache1(AGGFNOID,
 											 ObjectIdGetDatum(
@@ -2971,7 +2971,7 @@ WorkerAggregateExpressionList(Aggref *originalAggregate,
 		workerAggregateList = lappend(workerAggregateList, sumAggregate);
 		workerAggregateList = lappend(workerAggregateList, countAggregate);
 	}
-	else if (aggregateType == AGGREGATE_CUSTOM)
+	else if (aggregateType == AGGREGATE_CUSTOM_COMBINE)
 	{
 		HeapTuple aggTuple = SearchSysCache1(AGGFNOID,
 											 ObjectIdGetDatum(
@@ -3094,10 +3094,10 @@ GetAggregateType(Oid aggFunctionId)
 
 	if (AggregateEnabledCustom(aggFunctionId))
 	{
-		return AGGREGATE_CUSTOM;
+		return AGGREGATE_CUSTOM_COMBINE;
 	}
 
-	ereport(ERROR, (errmsg("unsupported aggregate function %s", aggregateProcName)));
+	return AGGREGATE_CUSTOM_COLLECT;
 }
 
 
