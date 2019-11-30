@@ -29,6 +29,7 @@
 #include "distributed/colocation_utils.h"
 #include "distributed/extended_op_node_utils.h"
 #include "distributed/function_utils.h"
+#include "distributed/listutils.h"
 #include "distributed/metadata_cache.h"
 #include "distributed/multi_logical_optimizer.h"
 #include "distributed/multi_logical_planner.h"
@@ -1888,80 +1889,96 @@ MasterAggregateExpression(Aggref *originalAggregate,
 	}
 	else if (aggregateType == AGGREGATE_CUSTOM_COLLECT)
 	{
-		SubLink *result = makeNode(SubLink);
-		Query *subquery = makeNode(Query);
 		Var *column = NULL;
-		RangeTblFunction *unnestrte = makeNode(RangeTblFunction);
 		Aggref *catAggCall = makeNode(Aggref);
-		Aggref *newAggregate = makeNode(Aggref);
-		Var *newAggVar = makeNode(Var);
-		RangeTblRef *rtf1 = makeNode(RangeTblRef);
-		FuncExpr *unnest = makeNode(FuncExpr);
 		Oid arrayType = get_array_type(linitial_oid(
 										   originalAggregate->aggargtypes));
-		Oid workerReturnType = exprType((Node *) originalAggregate);
-		int32 workerReturnTypeMod = exprTypmod((Node *) originalAggregate);
-		Oid workerCollationId = exprCollation((Node *) originalAggregate);
+		arrayType = RECORDARRAYOID;
 
-		column = makeVar(masterTableId, walkerContext->columnId, workerReturnType,
-						 workerReturnTypeMod, workerCollationId, columnLevelsUp);
+		column = makeVar(masterTableId, walkerContext->columnId, TEXTARRAYOID,
+						 -1, InvalidOid, columnLevelsUp);
 		walkerContext->columnId++;
 
-		rtf1->rtindex = 1;
+		return (Expr *) column;
+
+		RowExpr *rowExpr = makeNode(RowExpr);
+		rowExpr->row_format = COERCE_EXPLICIT_CALL;
+		rowExpr->row_typeid = RECORDOID;
+		rowExpr->args = NIL;
+
+		TargetEntry *aggArg = NULL;
+		foreach_ptr(aggArg, originalAggregate->args)
+		{
+			rowExpr->args = lappend(rowExpr->args, aggArg->expr);
+		}
+
+		RelabelType *relabel = makeNode(RelabelType);
+		relabel->arg = (Expr *) column;
+		relabel->resulttype = RECORDARRAYOID;
+		relabel->resulttypmod = BlessRecordExpression((Expr *) rowExpr);
+		relabel->resultcollid = InvalidOid;
+		relabel->relabelformat = COERCE_IMPLICIT_CAST;
+
+		elog(WARNING, "TYPMOD %d", column->vartypmod);
+
 
 		catAggCall->aggfnoid = AggregateFunctionOid(ARRAY_CAT_AGGREGATE_NAME,
 													ANYARRAYOID);
-		catAggCall->aggtype = arrayType;
+		catAggCall->aggtype = TEXTARRAYOID;
 		catAggCall->args = list_make1(makeTargetEntry((Expr *) column, 1, NULL, false));
 		catAggCall->aggkind = AGGKIND_NORMAL;
-		catAggCall->aggtranstype = InvalidOid;
-		catAggCall->aggargtypes = list_make1_oid(catAggCall->aggtype);
+		catAggCall->aggtranstype = INTERNALOID;
+		catAggCall->aggargtypes = list_make1_oid(arrayType);
 		catAggCall->aggsplit = AGGSPLIT_SIMPLE;
 
-		unnest->funcid = F_ARRAY_UNNEST;
-		unnest->funcresulttype = workerReturnType;
-		unnest->args = list_make1(catAggCall);
+		return (Expr *) catAggCall;
 
-		unnestrte->funcexpr = (Node *) unnest;
-		unnestrte->funccolcount = 1;
-
-		newAggVar->varattno = 1;
-		newAggVar->varno = 1;
-		newAggVar->vartype = originalAggregate->aggtype;
-		newAggVar->vartypmod = -1;
-		newAggVar->varcollid = InvalidOid;
-		newAggVar->location = -1;
-
-		newAggregate->aggfnoid = originalAggregate->aggfnoid;
-		newAggregate->aggcollid = originalAggregate->aggcollid;
-		newAggregate->aggtype = originalAggregate->aggtype;
-		newAggregate->aggfilter = originalAggregate->aggfilter;
-		newAggregate->aggdistinct = originalAggregate->aggdistinct;
-		newAggregate->aggsplit = originalAggregate->aggsplit;
-		newAggregate->aggtranstype = originalAggregate->aggtranstype;
-		newAggregate->aggargtypes = originalAggregate->aggargtypes;
-		newAggregate->aggorder = originalAggregate->aggorder;
-		newAggregate->aggsplit = originalAggregate->aggsplit;
-		newAggregate->aggkind = originalAggregate->aggkind;
-		newAggregate->args = list_make1(makeTargetEntry((Expr *) newAggVar, 1, NULL,
-														false));
-
-		subquery->commandType = CMD_SELECT;
-		subquery->hasAggs = true;
-		subquery->rtable = list_make1(unnestrte);
-		subquery->jointree = makeNode(FromExpr);
-		subquery->jointree->fromlist = list_make1(rtf1);
-		subquery->targetList = list_make1(makeTargetEntry((Expr *) newAggregate, 1, NULL,
-														  false));
-
-		result->subLinkType = EXPR_SUBLINK;
-		result->subLinkId = 0;
-		result->operName = NIL;
-		result->subselect = (Node *) subquery;
-
-		walkerContext->hasSubLinks = true;
-
-		return (Expr *) result;
+		/*
+		 * unnest->funcid = F_ARRAY_UNNEST;
+		 * unnest->funcresulttype = workerReturnType;
+		 * unnest->args = list_make1(catAggCall);
+		 *
+		 * unnestrte->funcexpr = (Node *) unnest;
+		 * unnestrte->funccolcount = 1;
+		 *
+		 * newAggVar->varattno = 1;
+		 * newAggVar->varno = 1;
+		 * newAggVar->vartype = originalAggregate->aggtype;
+		 * newAggVar->vartypmod = -1;
+		 * newAggVar->varcollid = InvalidOid;
+		 * newAggVar->location = -1;
+		 *
+		 * newAggregate->aggfnoid = originalAggregate->aggfnoid;
+		 * newAggregate->aggcollid = originalAggregate->aggcollid;
+		 * newAggregate->aggtype = originalAggregate->aggtype;
+		 * newAggregate->aggfilter = originalAggregate->aggfilter;
+		 * newAggregate->aggdistinct = originalAggregate->aggdistinct;
+		 * newAggregate->aggsplit = originalAggregate->aggsplit;
+		 * newAggregate->aggtranstype = originalAggregate->aggtranstype;
+		 * newAggregate->aggargtypes = originalAggregate->aggargtypes;
+		 * newAggregate->aggorder = originalAggregate->aggorder;
+		 * newAggregate->aggsplit = originalAggregate->aggsplit;
+		 * newAggregate->aggkind = originalAggregate->aggkind;
+		 * newAggregate->args = list_make1(makeTargetEntry((Expr *) newAggVar, 1, NULL,
+		 *                                              false));
+		 *
+		 * subquery->commandType = CMD_SELECT;
+		 * subquery->hasAggs = true;
+		 * subquery->rtable = list_make1(unnestrte);
+		 * subquery->jointree = makeNode(FromExpr);
+		 * subquery->jointree->fromlist = list_make1(rtf1);
+		 * subquery->targetList = list_make1(makeTargetEntry((Expr *) newAggregate, 1, NULL,
+		 *                                                false));
+		 *
+		 * result->subLinkType = EXPR_SUBLINK;
+		 * result->subLinkId = 0;
+		 * result->operName = NIL;
+		 * result->subselect = (Node *) subquery;
+		 *
+		 * walkerContext->hasSubLinks = true;
+		 *
+		 * return (Expr *) result;
+		 */
 	}
 	else
 	{
@@ -3034,13 +3051,37 @@ WorkerAggregateExpressionList(Aggref *originalAggregate,
 	{
 		Aggref *workerAggregate = copyObject(originalAggregate);
 
-		if (list_length(workerAggregate->args) > 1)
+		if (list_length(workerAggregate->aggdirectargs) > 1)
 		{
 			/* We could transform agg(a, b) to array_agg((a, b)) given support for anonymous types */
 			elog(ERROR, "Support for collect aggregation limited to unary aggregates");
 		}
 
+		RowExpr *rowExpr = makeNode(RowExpr);
+		rowExpr->row_format = COERCE_EXPLICIT_CALL;
+		rowExpr->row_typeid = RECORDOID;
+		rowExpr->args = NIL;
+
+		TargetEntry *aggArg = NULL;
+		foreach_ptr(aggArg, workerAggregate->args)
+		{
+			rowExpr->args = lappend(rowExpr->args, aggArg->expr);
+		}
+
+		TargetEntry *newTargetEntry = makeTargetEntry((Expr *) rowExpr, 1, NULL, false);
+
 		workerAggregate->aggfnoid = AggregateFunctionOid("array_agg", ANYARRAYOID);
+		workerAggregate->aggtype = TEXTARRAYOID;
+		workerAggregate->aggtranstype = INTERNALOID;
+		workerAggregate->aggdirectargs = NIL;
+		workerAggregate->aggkind = AGGKIND_NORMAL;
+		workerAggregate->args = list_make1(newTargetEntry);
+		workerAggregate->aggargtypes = list_make1_oid(TEXTARRAYOID);
+		workerAggregate->aggvariadic = false;
+		workerAggregate->aggorder = NIL;
+		workerAggregate->aggdistinct = NIL;
+		workerAggregate->aggstar = false;
+
 		workerAggregateList = lappend(workerAggregateList, workerAggregate);
 	}
 	else
