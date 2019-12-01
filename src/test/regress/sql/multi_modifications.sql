@@ -545,6 +545,11 @@ INSERT INTO raw_table VALUES (2, 500);
 INSERT INTO summary_table VALUES (1);
 INSERT INTO summary_table VALUES (2);
 
+-- test noop deletes
+DELETE FROM summary_table WHERE false;
+DELETE FROM summary_table WHERE null;
+DELETE FROM summary_table WHERE null > jsonb_build_array();
+
 SELECT * FROM summary_table ORDER BY id;
 
 UPDATE summary_table SET average_value = average_query.average FROM (
