@@ -32,9 +32,11 @@ extern bool ForceMaxQueryParallelization;
 extern int MaxAdaptiveExecutorPoolSize;
 extern int ExecutorSlowStartInterval;
 extern bool SortReturning;
+extern int ExecutorLevel;
 
 
 extern void CitusExecutorStart(QueryDesc *queryDesc, int eflags);
+extern void CitusExecutorEnd(QueryDesc *queryDesc);
 extern void CitusExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count,
 							 bool execute_once);
 extern TupleTableSlot * AdaptiveExecutor(CitusScanState *scanState);

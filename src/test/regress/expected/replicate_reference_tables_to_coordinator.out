@@ -135,6 +135,16 @@ DROP SCHEMA s1 CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table s1.ref
 drop cascades to table s1.ref_8000002
+-- error if inside a SQL UDF call
+CREATE or replace FUNCTION test_reference_local_join_func()
+RETURNS SETOF RECORD AS $$
+SET LOCAL citus.enable_local_execution to false;
+INSERT INTO numbers VALUES (2);
+SELECT local_table.a, numbers.a FROM local_table NATURAL JOIN numbers ORDER BY 1;
+$$ LANGUAGE sql;
+SELECT test_reference_local_join_func();
+ERROR:  cannot join local tables and reference tables in a transaction block
+CONTEXT:  SQL function "test_reference_local_join_func" statement 3
 -- shouldn't plan locally if modifications happen in CTEs, ...
 WITH ins AS (INSERT INTO numbers VALUES (1) RETURNING *) SELECT * FROM numbers, local_table;
 ERROR:  relation local_table is not distributed

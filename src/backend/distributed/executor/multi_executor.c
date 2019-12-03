@@ -56,6 +56,13 @@ bool WritableStandbyCoordinator = false;
 /* sort the returning to get consistent outputs, used only for testing */
 bool SortReturning = false;
 
+/*
+ * How many nested executors have we started? This can happen for SQL
+ * UDF calls. The outer query starts an executor, then postgres opens
+ * another executor to run the SQL UDF.
+ */
+int ExecutorLevel = 0;
+
 
 /* local function forward declarations */
 static Relation StubRelation(TupleDesc tupleDescriptor);
@@ -70,6 +77,8 @@ void
 CitusExecutorStart(QueryDesc *queryDesc, int eflags)
 {
 	PlannedStmt *plannedStmt = queryDesc->plannedstmt;
+
+	ExecutorLevel++;
 
 	if (CitusHasBeenLoaded())
 	{
@@ -123,6 +132,18 @@ CitusExecutorStart(QueryDesc *queryDesc, int eflags)
 
 
 /*
+ * CitusExecutorEnd is the ExecutorEnd_hook that gets called when postgres
+ * ends the executor.
+ */
+void
+CitusExecutorEnd(QueryDesc *queryDesc)
+{
+	ExecutorLevel--;
+	standard_ExecutorEnd(queryDesc);
+}
+
+
+/*
  * CitusExecutorRun is the ExecutorRun_hook that gets called when postgres
  * executes a query.
  */
@@ -131,16 +152,16 @@ CitusExecutorRun(QueryDesc *queryDesc,
 				 ScanDirection direction, uint64 count, bool execute_once)
 {
 	DestReceiver *dest = queryDesc->dest;
-	int originalLevel = FunctionCallLevel;
+	int originalLevel = SPILevel;
 
 	if (dest->mydest == DestSPI)
 	{
 		/*
-		 * If the query runs via SPI, we assume we're in a function call
+		 * If the query runs via SPI, we assume we're in a function call.
 		 * and we should treat statements as part of a bigger transaction.
 		 * We reset this counter to 0 in the abort handler.
 		 */
-		FunctionCallLevel++;
+		SPILevel++;
 	}
 
 	/*
@@ -182,7 +203,7 @@ CitusExecutorRun(QueryDesc *queryDesc,
 		 * the value because exceptions might cause us to go back a few
 		 * levels at once.
 		 */
-		FunctionCallLevel = originalLevel;
+		SPILevel = originalLevel;
 	}
 }
 
