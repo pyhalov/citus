@@ -267,9 +267,9 @@ PlanDropCollationStmt(DropStmt *stmt)
 	char *dropStmtSql = DeparseTreeNode((Node *) stmt);
 	stmt->objects = oldCollations;
 
-	/* to prevent recursion with mx we disable ddl propagation */
 	EnsureSequentialModeForCollationDDL();
 
+	/* to prevent recursion with mx we disable ddl propagation */
 	List *commands = list_make3(DISABLE_DDL_PROPAGATION,
 								(void *) dropStmtSql,
 								ENABLE_DDL_PROPAGATION);
@@ -333,9 +333,9 @@ PlanRenameCollationStmt(RenameStmt *stmt, const char *queryString)
 	/* deparse sql*/
 	char *renameStmtSql = DeparseTreeNode((Node *) stmt);
 
-	/* to prevent recursion with mx we disable ddl propagation */
 	EnsureSequentialModeForCollationDDL();
 
+	/* to prevent recursion with mx we disable ddl propagation */
 	List *commands = list_make3(DISABLE_DDL_PROPAGATION,
 								(void *) renameStmtSql,
 								ENABLE_DDL_PROPAGATION);
