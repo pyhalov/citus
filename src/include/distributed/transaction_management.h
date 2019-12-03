@@ -100,9 +100,6 @@ extern int StoredProcedureLevel;
 /* number of nested DO block levels we are currently in */
 extern int DoBlockLevel;
 
-/* number of nested SPI call levels we are currently in */
-extern int SPILevel;
-
 /* SET LOCAL statements active in the current (sub-)transaction. */
 extern StringInfo activeSetStmts;
 

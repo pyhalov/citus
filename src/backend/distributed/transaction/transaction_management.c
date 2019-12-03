@@ -94,9 +94,6 @@ bool CoordinatedTransactionUses2PC = false;
 /* if disabled, distributed statements in a function may run as separate transactions */
 bool FunctionOpensTransactionBlock = true;
 
-/* stack depth of SPI calls */
-int SPILevel = 0;
-
 
 /* transaction management functions */
 static void BeginCoordinatedTransaction(void);
@@ -110,7 +107,7 @@ static void AdjustMaxPreparedTransactions(void);
 static void PushSubXact(SubTransactionId subId);
 static void PopSubXact(SubTransactionId subId);
 static void SwallowErrors(void (*func)());
-static bool ExecutingUDF(void);
+static bool MaybeExecutingUDF(void);
 
 
 /*
@@ -304,7 +301,6 @@ CoordinatedTransactionCallback(XactEvent event, void *arg)
 			dlist_init(&InProgressTransactions);
 			activeSetStmts = NULL;
 			CoordinatedTransactionUses2PC = false;
-			SPILevel = 0;
 			ExecutorLevel = 0;
 
 			/*
@@ -683,7 +679,7 @@ IsMultiStatementTransaction(void)
 		/* in (a transaction within) a stored procedure */
 		return true;
 	}
-	else if (ExecutingUDF() && FunctionOpensTransactionBlock)
+	else if (MaybeExecutingUDF() && FunctionOpensTransactionBlock)
 	{
 		/* in a language-handler function call, open a transaction if configured to do so */
 		return true;
@@ -696,14 +692,12 @@ IsMultiStatementTransaction(void)
 
 
 /*
- * ExecutingUDF returns true if we are executing a function call.
+ * MaybeExecutingUDF returns true if we are possibly executing a function call.
+ * We use nested level of executor to check this, so this can return true for
+ * CTEs, etc. which also start nested executors.
  */
 static bool
-ExecutingUDF(void)
+MaybeExecutingUDF(void)
 {
-	/*
-	 * SQL UDFs start another executor, and PL UDFs use SPI to
-	 * execute statements.
-	 */
-	return ExecutorLevel > 1 || SPILevel > 0;
+	return ExecutorLevel > 1;
 }
