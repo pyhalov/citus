@@ -280,7 +280,6 @@ ORDER BY
   user_id
 LIMIT
   5;
-INFO:  Skipped inlining the cte cte because if inlined, Citus planner would error with: could not run distributed query because the window function that is used cannot be pushed down
  row_number | user_id 
 ------------+---------
           2 |       6

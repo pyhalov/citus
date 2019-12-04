@@ -701,9 +701,13 @@ INSERT INTO agg_events
     raw_events_first.user_id, (SELECT * FROM sub_cte)
   FROM
     raw_events_first;
-DEBUG:  CTE sub_cte is going to be inlined via distributed planning
+DEBUG:  Skipped inlining the cte sub_cte because if inlined, Citus planner might error with: could not run distributed query with subquery outside the FROM, WHERE and HAVING clauses
 DEBUG:  Subqueries without relations are not allowed in distributed INSERT ... SELECT queries
 DEBUG:  Collecting INSERT ... SELECT results on coordinator
+DEBUG:  Skipped inlining the cte sub_cte because if inlined, Citus planner might error with: could not run distributed query with subquery outside the FROM, WHERE and HAVING clauses
+DEBUG:  Router planner cannot handle multi-shard select queries
+DEBUG:  generating subplan 53_1 for CTE sub_cte: SELECT 1
+DEBUG:  Plan 53 query after replacing subqueries and CTEs: SELECT user_id, (SELECT sub_cte."?column?" FROM (SELECT intermediate_result."?column?" FROM read_intermediate_result('53_1'::text, 'binary'::citus_copy_format) intermediate_result("?column?" integer)) sub_cte) FROM public.raw_events_first
 DEBUG:  Router planner cannot handle multi-shard select queries
 ERROR:  could not run distributed query with subquery outside the FROM, WHERE and HAVING clauses
 HINT:  Consider using an equality filter on the distributed table's partition column.

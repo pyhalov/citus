@@ -1,6 +1,6 @@
 CREATE SCHEMA cte_inline;
 SET search_path TO cte_inline;
-
+SET citus.next_shard_id TO 1960000;
 CREATE TABLE test_table (key int, value text, other_value jsonb);
 SELECT create_distributed_table ('test_table', 'key');
 
@@ -45,6 +45,62 @@ WHERE
 			FROM
 				test_table
 			);
+
+-- even if the CTE is not used immediately
+-- on a query that Citus could not support,
+-- it skips inlining, otherwise the planner
+-- might fail
+WITH cte_1 AS
+  (SELECT *
+   FROM test_table)
+SELECT row_number() OVER ()
+FROM
+  (SELECT *
+   FROM cte_1) AS foo;
+
+-- a little more complicated query tree
+-- Citus can inline top_cte, because when inlined
+-- it can be planned by Citus. However, citus doesn't
+-- inline cte_1 because when inlined, Citus cannot
+-- plan the query
+WITH top_cte AS
+  (SELECT *
+   FROM test_table)
+SELECT *
+FROM top_cte,
+  (WITH cte_1 AS
+     (SELECT *
+      FROM test_table) SELECT row_number() OVER ()
+   FROM
+     (SELECT *
+      FROM cte_1) AS foo) AS bar;
+
+-- CTE is used inside a subquery in WHERE clause
+-- so, should not be inlined
+WITH cte_1 AS
+  (SELECT *
+   FROM test_table)
+SELECT count(*)
+FROM test_table
+WHERE KEY IN
+    (SELECT row_number() OVER () AS KEY
+     FROM
+       (SELECT *,
+               random()
+        FROM
+          (SELECT *
+           FROM cte_1) AS foo) AS bar);
+
+-- cte_1 is used inside another CTE, but still
+-- should not be inlined because it is finally
+-- used in an unsupported query
+WITH cte_1 AS
+  (SELECT *
+   FROM test_table)
+SELECT row_number() OVER () AS KEY  FROM (
+  WITH cte_2 AS (SELECT *, random()
+     FROM (SELECT *,random() FROM cte_1) as foo)
+SELECT *, random() FROM cte_2) as bar;
 
 -- in this example, cte_2 can be inlined, because it is not used
 -- on any query that Citus cannot plan. However, cte_1 should not be
@@ -214,9 +270,10 @@ UNION
 (SELECT *, 1 FROM cte_2);
 
 
--- now, both ctes are safe to inline, but after inlining
--- cte_1, the leftarg of the UNION operations cannot be
--- planned by Citus, so the query fails
+-- cte_1 is not safe to inline, because after inlining
+-- it'd be in a query tree where there is a query that is
+-- not supported by Citus
+-- cte_2 is on another queryTree, should be fine
 WITH cte_1 AS (SELECT * FROM test_table),
 	 cte_2 AS (SELECT * FROM test_table)
 (SELECT *, (SELECT key FROM cte_1) FROM test_table)

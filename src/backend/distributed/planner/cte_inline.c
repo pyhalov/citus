@@ -52,6 +52,12 @@ typedef struct inline_cte_walker_context
 } inline_cte_walker_context;
 
 
+typedef struct query_trace_context
+{
+	List *queryList;
+	CommonTableExpr *cte;
+} query_trace_context;
+
 /* copy & paste from Postgres source, moved into a function for readability */
 static bool PostgreSQLCTEInlineCondition(CommonTableExpr *cte, CmdType cmdType);
 
@@ -64,8 +70,11 @@ static bool contain_dml_walker(Node *node, void *context);
 /* the following utility functions are related to Citus' logic */
 static bool RecusrivelyInlineCteWalker(Node *node, void *context);
 static void InlineCTEsInQueryTree(Query *query);
-static Query * QueryInWhichCteIsUsed(Query *query, CommonTableExpr *cte);
+static bool CitusCTEInlineCondition(Query *query, CommonTableExpr *cte);
+static List * QueriesRelyOnCte(Query *query, CommonTableExpr *cte);
+static bool QueriesRelyOnCteWalker(Node *node, void *context);
 static bool CteUsedInRtable(List *rangeTableList, CommonTableExpr *cte);
+static DeferredErrorMessage * DeferErrorIfQueryNotSupportedWhenCteInlined(Query *query);
 static bool QueryTreeContainsCteWalker(Node *node);
 
 
@@ -75,6 +84,10 @@ static bool QueryTreeContainsCteWalker(Node *node);
  * inlining are inlined as subqueries. This is useful in distributed planning
  * because Citus' sub(query) planning logic superior to CTE planning, where CTEs
  * are always recursively planned, which might produce very slow executions.
+ *
+ * Inlining is useful in distributed planning because Citus' sub(query) planning
+ * logic superior to CTE planning, where CTEs are always recursively planned,
+ * which might produce very slow executions.
  */
 void
 RecursivelyInlineCtesInQueryTree(Query *query)
@@ -114,6 +127,58 @@ RecusrivelyInlineCteWalker(Node *node, void *context)
 
 
 /*
+ * DeferErrorIfQueryNotSupportedWhenCteInlined returns true if it is safe to inline
+ * CTE from the distributed planning perspective. The main blocker for inlining
+ * CTEs from distributed planning perspective is that when ctes inlined, the
+ * query might not be supported by Citus. In other words, some of the query relies on
+ * materialization of the CTE results as intermediate results via recursive
+ * planning. A very simple example is the following where window function is not
+ * supported if cte is inlined:
+ *
+ * WITH cte_1 AS (SELECT * FROM test)
+ * SELECT *, row_number() OVER () FROM cte_1;
+ */
+static DeferredErrorMessage *
+DeferErrorIfQueryNotSupportedWhenCteInlined(Query *query)
+{
+	if (query->commandType != CMD_SELECT)
+	{
+		/*
+		 * Postgres cte inlining checks also enforces this, but still we wouldn't
+		 * want to call Citus functions that are intended to operate on SELECT
+		 * queries below. We're not going to inline CTEs anyway.
+		 */
+		return false;
+	}
+
+	/*
+	 * Although logical planner cannot handle CTEs and set operations (e.g., the
+	 * following check would fail on any query with CTEs/set operations), Citus
+	 * has other ways of planning those.
+	 *
+	 * For CTEs, we'd either inline here and let the rest of planning handle it,
+	 * or recursively plan. For set operations, we'd either pushdown via pushdown
+	 * planning or recursively plan.
+	 *
+	 * So, for now ignore both constructs.
+	 */
+	List *originalCteList = query->cteList;
+	query->cteList = NIL;
+
+	Node *originalSetOperations = query->setOperations;
+	query->setOperations = NULL;
+
+	DeferredErrorMessage *deferredError = DeferErrorIfQueryNotSupported(query);
+
+	/* set the original ctes and set operations back */
+	query->cteList = originalCteList;
+	query->setOperations = originalSetOperations;
+
+	return deferredError;
+}
+
+
+/*
  * InlineCTEsInQueryTree gets a query tree and tries to inline CTEs as subqueries
  * in the query tree.
  *
@@ -121,7 +186,7 @@ RecusrivelyInlineCteWalker(Node *node, void *context)
  * that PostgreSQL enforces before inlining CTEs, Citus adds one more check. The check is
  * that if a CTE is inlined, would the resulting query become plannable by Citus? If not,
  * we skip inlining, and let the recursive planning handle it by converting the CTE to an
- * intermediate result, which always ends-up with a successfull distributed plan.
+ * intermediate result, which always ends-up with a successful distributed plan.
  */
 void
 InlineCTEsInQueryTree(Query *query)
@@ -142,70 +207,10 @@ InlineCTEsInQueryTree(Query *query)
 		/*
 		 * First, make sure that Postgres is OK to inline the CTE. Later, check for
 		 * distributed query planning constraints that might prevent inlining.
-		 *
-		 * We're conservative about inlining CTE(s) if the resulting query cannot be
-		 * planned by Citus. The main idea here is that the user is likely to rely on
-		 * recursive planning of the CTE(s) to be able to run the query such as the
-		 * following where Citus cannot plan some of the window functions on distributed
-		 * tables:
-		 *
-		 *    WITH cte_1 AS (SELECT * FROM test)
-		 *      SELECT *, row_number() OVER () FROM cte_1;
 		 */
-		if (PostgreSQLCTEInlineCondition(cte, query->commandType))
+		if (PostgreSQLCTEInlineCondition(cte, query->commandType) &&
+			CitusCTEInlineCondition(query, cte))
 		{
-			Query *queryInWhichCteIsUsed = QueryInWhichCteIsUsed(query, cte);
-
-			/*
-			 * Although logical planner cannot handle CTEs (e.g., the following check
-			 * would fail on any query with CTEs), Citus has other ways of planning CTEs.
-			 * We'd either inline CTEs here, or recursively plan. So, ignore CTEs for the
-			 * purposes of this check.
-			 */
-			List *cteListOfQueryWhereCteIsUsed = queryInWhichCteIsUsed->cteList;
-			queryInWhichCteIsUsed->cteList = NIL;
-			DeferredErrorMessage *deferredError =
-				DeferErrorIfQueryNotSupported(queryInWhichCteIsUsed);
-			if (deferredError != NULL)
-			{
-#if PG_VERSION_NUM <= 110000
-
-				/*
-				 *  A comment block within PG_VERSION_NUM check, interesting ha?
-				 *  Please read through especially if you're dropping support for
-				 *  Postgres 11.
-				 *
-				 *  In Postgres 12 (and above), Postgres does the CTE inlining
-				 *  during standard_planner(). However, as of now, Citus supports
-				 *  Postgres 11 as well. Thus, Citus takes care of CTE inlining
-				 *  even before standard planner is called so that Citus behaves
-				 *  the same across different postgres versions.
-				 *
-				 *  Because we inline CTEs before any distributed planning, this
-				 *  check is unnecessarily enforced for router queries as well.
-				 *  That's not a problem because router planner can handle
-				 *  subqueries and CTEs equally. But, we unnecessarily have to
-				 *  go through these code-path.
-				 *
-				 *  In that sense, when we drop Postgres 11  support, we should
-				 *  remove RecursivelyInlineCtesInQueryTree() function from the
-				 *  source code and move InlineCTEsInQueryTree() to
-				 *  RecursivelyPlanSubqueriesAndCTEs() just before CTEs are
-				 *  recursively planned. That would prevent router queries go
-				 *  through this logic and prevent an extra query tree traversal/copy
-				 *  at the start of the distributed planning.
-				 */
-#endif
-				queryInWhichCteIsUsed->cteList = cteListOfQueryWhereCteIsUsed;
-				elog(INFO, "Skipped inlining the cte %s because if inlined, "
-						   "Citus planner would error with: %s", cte->ctename,
-					 deferredError->message);
-				continue;
-			}
-
-			/* set the original cteList back */
-			queryInWhichCteIsUsed->cteList = cteListOfQueryWhereCteIsUsed;
-
 			elog(DEBUG1, "CTE %s is going to be inlined via "
 						 "distributed planning", cte->ctename);
 
@@ -221,58 +226,121 @@ InlineCTEsInQueryTree(Query *query)
 
 
 /*
- * QueryInWhichCteIsUsed gets a Query and CommonTableExpr, traverses all the
- * (sub)queries in the query, and returns the query where the cte is in the
- * range table entry.
+ * CitusCTEInlineCondition gets a query tree and a cte, and returns
+ * true if it is safe to inline the CTE in terms of distributed planning.
  *
- * The function never returns NULL, but it could throw an error, see the details
- * in the function.
+ * Note that if a CTE is not inlined, it'd be recursively planned and provide
+ * full SQL coverage on the materialized result (a.k.a., the intermediate result).
+ * In case it is inlined as a subquery, it might fail due to lack of SQL support
+ * of Citus in multi-shard queries.
  */
-static Query *
-QueryInWhichCteIsUsed(Query *query, CommonTableExpr *cte)
+static bool
+CitusCTEInlineCondition(Query *query, CommonTableExpr *cte)
 {
+	DeferredErrorMessage *deferredError = NULL;
+
 	/*
-	 * Given that PostgreSQLCTEInlineCondition() checks for cte->cterefcount == 1,
-	 * we don't have to deal with ctelevels while finding the query that the cte
-	 * is used since any inlining candidate can only be used once in the query.
+	 * We rely on the fact that this function is called after
+	 * PostgreSQL's checks.
 	 */
 	Assert(cte->cterefcount == 1);
 
+	List *queryList = QueriesRelyOnCte(query, cte);
 	ListCell *queryCell = NULL;
-	List *allQueries = NIL;
 
-	/*
-	 * ExtractQueryWalker pulls the (sub)queries in the query from top to bottom.
-	 * This is important because there might be ctes with the same name as the
-	 * input cte, defined in the lower parts of the query. With this approach, we're
-	 * ensuring that we'll find the cte that we're interested in.
-	 */
-	ExtractQueryWalker((Node *) query, &allQueries);
-	Assert(equal(query, linitial(allQueries)));
-	foreach(queryCell, allQueries)
+	foreach(queryCell, queryList)
 	{
 		Query *aQuery = (Query *) lfirst(queryCell);
-		if (CteUsedInRtable(aQuery->rtable, cte))
+		deferredError = DeferErrorIfQueryNotSupportedWhenCteInlined(aQuery);
+		if (deferredError != NULL)
 		{
-			return aQuery;
+			elog(DEBUG1, "Skipped inlining the cte %s because if inlined, "
+						 "Citus planner might error with: %s", cte->ctename,
+				 deferredError->message);
+
+			return false;
 		}
 	}
 
-	/*
-	 * We should never get here, unless the query is bogus (which is unlikely) or
-	 * we're calling the wrong query/cte pair.
-	 */
-	ereport(ERROR,
-			(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-			 errmsg("could not find cte: %s in the query",
-					cte->ctename)));
+	return true;
+}
+
+
+/*
+ * QueriesRelyOnCte gets a query and cte, returns the list of queries that rely
+ * on the cte. We use the term "rely on" to indicate that any tuple returned by
+ * the CTE can affect the tuples returned by the queries in the list.
+ *
+ * The function recursively traverses the query, and while doing that keeps
+ * a list of the queries that it traversed already, until the input CTE is found.
+ */
+static List *
+QueriesRelyOnCte(Query *query, CommonTableExpr *cte)
+{
+	if (CteUsedInRtable(query->rtable, cte))
+	{
+		/* if the query itself uses the CTE, return immediately */
+		return list_make1(query);
+	}
+
+	query_trace_context context;
+
+	context.queryList = list_make1(query);
+	context.cte = cte;
+
+	query_tree_walker(query, QueriesRelyOnCteWalker, (void *) &context, 0);
+
+	return context.queryList;
+}
+
+
+/*
+ * QueriesRelyOnCteWalker is the walker function for QueriesRelyOnCte, please see
+ * that for the details.
+ */
+static bool
+QueriesRelyOnCteWalker(Node *node, void *context)
+{
+	if (node == NULL)
+	{
+		return false;
+	}
+
+	if (IsA(node, Query))
+	{
+		Query *query = (Query *) node;
+		query_trace_context *queryTraceContext = (query_trace_context *) context;
+		List *queryList = queryTraceContext->queryList;
+
+		/* remember the query */
+		queryList = lappend(queryList, query);
+
+		if (CteUsedInRtable(query->rtable, queryTraceContext->cte))
+		{
+			/*
+			 * We've found where the CTE is used, no need to
+			 * continue the search anymore.
+			 */
+			return true;
+		}
+
+		bool foundInQuery = query_tree_walker(query, QueriesRelyOnCteWalker, context, 0);
+		if (!foundInQuery)
+		{
+			/* remove from the list if the CTE is not used in this query at all */
+			queryList = list_delete_ptr(queryList, query);
+		}
+
+		return foundInQuery;
+	}
+
+	return expression_tree_walker(node, QueriesRelyOnCteWalker, context);
 }
 
 
 /*
  * CteUsedInRtable gets a rangeTableList and a CommonTableExpr. The
  * function returns true if the cte shows up in the range table list.
- *
  *
  * Also, the function does not consider ctelevelsup, that's the callers
  * responsibility to make sure the relevant CTEs are passed to the function.
@@ -281,6 +349,12 @@ static bool
 CteUsedInRtable(List *rangeTableList, CommonTableExpr *cte)
 {
 	ListCell *rteCell = NULL;
+
+	/*
+	 * We rely on the fact that this function is called after
+	 * PostgreSQL's checks.
+	 */
+	Assert(cte->cterefcount == 1);
 
 	foreach(rteCell, rangeTableList)
 	{

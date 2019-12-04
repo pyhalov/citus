@@ -312,7 +312,6 @@ FROM
   cte, users_table
 WHERE
   cte.count=user_id and user_id=5;
-INFO:  Skipped inlining the cte cte because if inlined, Citus planner would error with: could not run distributed query because the window function that is used cannot be pushed down
  row_number | count 
 ------------+-------
           1 |     0
