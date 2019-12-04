@@ -359,7 +359,6 @@ TupleStoreToPredistributionStats(Tuplestorestate *tupleStore, TupleDesc resultDe
 		int sourceNodeId = DatumGetInt32(slot_getattr(slot, 1, &isNull));
 		int64 sourceShardId = DatumGetInt64(slot_getattr(slot, 2, &isNull));
 		int targetShardIndex = DatumGetInt32(slot_getattr(slot, 3, &isNull));
-		int64 byteCount = DatumGetInt64(slot_getattr(slot, 4, &isNull));
 		int64 rowCount = DatumGetInt64(slot_getattr(slot, 5, &isNull));
 
 		/* protect against garbage results */
@@ -373,7 +372,6 @@ TupleStoreToPredistributionStats(Tuplestorestate *tupleStore, TupleDesc resultDe
 		shardFragmentStats->sourceNodeId = sourceNodeId;
 		shardFragmentStats->sourceShardId = sourceShardId;
 		shardFragmentStats->targetShardIndex = targetShardIndex;
-		shardFragmentStats->byteCount = byteCount;
 		shardFragmentStats->rowCount = rowCount;
 
 		TargetShardFragments *fragmentSet =
