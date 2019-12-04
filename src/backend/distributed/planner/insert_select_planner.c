@@ -203,7 +203,7 @@ CreateInsertSelectPlan(uint64 planId, Query *originalQuery,
 
 /*
  * CreateDistributedInsertSelectPlan creates a DistributedPlan for distributed
- * INSERT ... SELECT queries which could consists of multiple tasks.
+ * INSERT ... SELECT queries which could consist of multiple tasks.
  *
  * The function never returns NULL, it errors out if cannot create the DistributedPlan.
  */
@@ -262,9 +262,6 @@ CreateDistributedInsertSelectPlan(Query *originalQuery,
 															taskIdIndex,
 															allDistributionKeysInQueryAreEqual);
 
-		/* Planning error gelmisse return et, ustteki fonksiyona */
-		/* distributed plan gecir */
-
 		/* add the task if it could be created */
 		if (modifyTask != NULL)
 		{
@@ -273,7 +270,7 @@ CreateDistributedInsertSelectPlan(Query *originalQuery,
 			sqlTaskList = lappend(sqlTaskList, modifyTask);
 		}
 
-		++taskIdIndex;
+		taskIdIndex++;
 	}
 
 	/* Create the worker job */
@@ -292,7 +289,7 @@ CreateDistributedInsertSelectPlan(Query *originalQuery,
 	distributedPlan->hasReturning = false;
 	distributedPlan->targetRelationId = targetRelationId;
 
-	if (list_length(originalQuery->returningList) > 0)
+	if (originalQuery->returningList != NIL)
 	{
 		distributedPlan->hasReturning = true;
 	}
