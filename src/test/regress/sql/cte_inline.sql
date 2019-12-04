@@ -10,7 +10,7 @@ SET client_min_messages TO DEBUG;
 -- plan the query
 WITH cte_1 AS (SELECT * FROM test_table)
 SELECT
-	*, row_number() OVER ()
+	*, (SELECT 1)
 FROM
 	cte_1;
 
@@ -25,7 +25,7 @@ FROM
 WHERE
 	key IN (
 			SELECT
-				row_number() OVER () as row_n
+				(SELECT 1)
 			FROM
 				test_table WHERE key = 1
 			);
@@ -41,9 +41,10 @@ FROM
 WHERE
 	key IN (
 			SELECT
-				row_number() OVER () as row_n
+				key
 			FROM
 				test_table
+  			 	FOR UPDATE
 			);
 
 -- even if the CTE is not used immediately
@@ -53,7 +54,7 @@ WHERE
 WITH cte_1 AS
   (SELECT *
    FROM test_table)
-SELECT row_number() OVER ()
+SELECT *, (SELECT 1)
 FROM
   (SELECT *
    FROM cte_1) AS foo;
@@ -70,7 +71,7 @@ SELECT *
 FROM top_cte,
   (WITH cte_1 AS
      (SELECT *
-      FROM test_table) SELECT row_number() OVER ()
+      FROM test_table) SELECT *, (SELECT 1)
    FROM
      (SELECT *
       FROM cte_1) AS foo) AS bar;
@@ -83,7 +84,7 @@ WITH cte_1 AS
 SELECT count(*)
 FROM test_table
 WHERE KEY IN
-    (SELECT row_number() OVER () AS KEY
+    (SELECT (SELECT 1)
      FROM
        (SELECT *,
                random()
@@ -97,20 +98,20 @@ WHERE KEY IN
 WITH cte_1 AS
   (SELECT *
    FROM test_table)
-SELECT row_number() OVER () AS KEY  FROM (
+SELECT (SELECT 1) AS KEY  FROM (
   WITH cte_2 AS (SELECT *, random()
      FROM (SELECT *,random() FROM cte_1) as foo)
 SELECT *, random() FROM cte_2) as bar;
 
 -- in this example, cte_2 can be inlined, because it is not used
 -- on any query that Citus cannot plan. However, cte_1 should not be
--- inlined, because it is used with an unsupported window function
+-- inlined, because it is used with a subquery in target list
 WITH cte_1 AS (SELECT * FROM test_table),
      cte_2 AS (select * from test_table)
 SELECT
 	*
 FROM
-	(SELECT *, row_number() OVER () FROM cte_1) as foo
+	(SELECT *, (SELECT 1) FROM cte_1) as foo
 		JOIN
 	cte_2
 		ON (true);
@@ -128,10 +129,10 @@ WHERE
 -- router queries are affected by the distributed
 -- cte inlining. In this example, although it is
 -- a router query, Citus decides not to inline the CTE
--- because of the window function
-WITH a AS (SELECT * FROM test_table)
+-- because of the subquery in target list
+WITH a AS (SELECT * FROM test_table WHERE key = 1)
 SELECT
-	*, row_number() OVER ()
+	*, (SELECT 1)
 FROM
 	a
 WHERE
@@ -344,8 +345,8 @@ WITH fist_table_cte AS
 -- update/delete/modifying ctes
 -- we don't support any cte inlining in modifications
 -- queries and modifying CTEs
-WITH cte_1 AS (SELECT * FROM test_table WHERE key > 1)
-	DELETE FROM test_table WHERE key IN (SELECT key FROM cte_1);
+WITH cte_1 AS (SELECT * FROM test_table)
+	DELETE FROM test_table WHERE key NOT IN (SELECT key FROM cte_1);
 
 -- we don't inline CTEs if they are modifying CTEs
 WITH cte_1 AS (DELETE FROM test_table RETURNING key)

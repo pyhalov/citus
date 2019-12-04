@@ -13,18 +13,18 @@ SET client_min_messages TO DEBUG;
 -- plan the query
 WITH cte_1 AS (SELECT * FROM test_table)
 SELECT
-	*, row_number() OVER ()
+	*, (SELECT 1)
 FROM
 	cte_1;
-DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query because the window function that is used cannot be pushed down
+DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query with subquery outside the FROM, WHERE and HAVING clauses
 DEBUG:  Router planner cannot handle multi-shard select queries
 DEBUG:  generating subplan 1_1 for CTE cte_1: SELECT key, value, other_value FROM cte_inline.test_table
 DEBUG:  Router planner cannot handle multi-shard select queries
-DEBUG:  Plan 1 query after replacing subqueries and CTEs: SELECT key, value, other_value, row_number() OVER () AS row_number FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('1_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1
+DEBUG:  Plan 1 query after replacing subqueries and CTEs: SELECT key, value, other_value, (SELECT 1) FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('1_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1
 DEBUG:  Creating router plan
 DEBUG:  Plan is router executable
- key | value | other_value | row_number 
------+-------+-------------+------------
+ key | value | other_value | ?column? 
+-----+-------+-------------+----------
 (0 rows)
 
 -- the cte can be inlined because the unsupported
@@ -38,18 +38,17 @@ FROM
 WHERE
 	key IN (
 			SELECT
-				row_number() OVER () as row_n
+				(SELECT 1)
 			FROM
 				test_table WHERE key = 1
 			);
 DEBUG:  CTE cte_1 is going to be inlined via distributed planning
 DEBUG:  Router planner cannot handle multi-shard select queries
-DEBUG:  Distributed planning for a fast-path router query
 DEBUG:  Creating router plan
 DEBUG:  Plan is router executable
 DETAIL:  distribution column value: 1
-DEBUG:  generating subplan 3_1 for subquery SELECT row_number() OVER () AS row_n FROM cte_inline.test_table WHERE (key OPERATOR(pg_catalog.=) 1)
-DEBUG:  Plan 3 query after replacing subqueries and CTEs: SELECT count(*) AS count FROM (SELECT test_table.key, test_table.value, test_table.other_value FROM cte_inline.test_table) cte_1 WHERE (key OPERATOR(pg_catalog.=) ANY (SELECT intermediate_result.row_n FROM read_intermediate_result('3_1'::text, 'binary'::citus_copy_format) intermediate_result(row_n bigint)))
+DEBUG:  generating subplan 3_1 for subquery SELECT (SELECT 1) FROM cte_inline.test_table WHERE (key OPERATOR(pg_catalog.=) 1)
+DEBUG:  Plan 3 query after replacing subqueries and CTEs: SELECT count(*) AS count FROM (SELECT test_table.key, test_table.value, test_table.other_value FROM cte_inline.test_table) cte_1 WHERE (key OPERATOR(pg_catalog.=) ANY (SELECT intermediate_result."?column?" FROM read_intermediate_result('3_1'::text, 'binary'::citus_copy_format) intermediate_result("?column?" integer)))
 DEBUG:  Router planner cannot handle multi-shard select queries
  count 
 -------
@@ -67,15 +66,16 @@ FROM
 WHERE
 	key IN (
 			SELECT
-				row_number() OVER () as row_n
+				key
 			FROM
 				test_table
+  			 	FOR UPDATE
 			);
 DEBUG:  CTE cte_1 is going to be inlined via distributed planning
 DEBUG:  Router planner cannot handle multi-shard select queries
-DEBUG:  Router planner cannot handle multi-shard select queries
-ERROR:  could not run distributed query because the window function that is used cannot be pushed down
-HINT:  Window functions are supported in two ways. Either add an equality filter on the distributed tables' partition column or use the window functions with a PARTITION BY clause containing the distribution column
+DEBUG:  SELECT FOR UPDATE with table replication factor > 1 not supported for non-reference tables.
+ERROR:  could not run distributed query with FOR UPDATE/SHARE commands
+HINT:  Consider using an equality filter on the distributed table's partition column.
 -- even if the CTE is not used immediately
 -- on a query that Citus could not support,
 -- it skips inlining, otherwise the planner
@@ -83,19 +83,19 @@ HINT:  Window functions are supported in two ways. Either add an equality filter
 WITH cte_1 AS
   (SELECT *
    FROM test_table)
-SELECT row_number() OVER ()
+SELECT *, (SELECT 1)
 FROM
   (SELECT *
    FROM cte_1) AS foo;
-DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query because the window function that is used cannot be pushed down
+DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query with subquery outside the FROM, WHERE and HAVING clauses
 DEBUG:  Router planner cannot handle multi-shard select queries
 DEBUG:  generating subplan 7_1 for CTE cte_1: SELECT key, value, other_value FROM cte_inline.test_table
 DEBUG:  Router planner cannot handle multi-shard select queries
-DEBUG:  Plan 7 query after replacing subqueries and CTEs: SELECT row_number() OVER () AS row_number FROM (SELECT cte_1.key, cte_1.value, cte_1.other_value FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('7_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1) foo
+DEBUG:  Plan 7 query after replacing subqueries and CTEs: SELECT key, value, other_value, (SELECT 1) FROM (SELECT cte_1.key, cte_1.value, cte_1.other_value FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('7_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1) foo
 DEBUG:  Creating router plan
 DEBUG:  Plan is router executable
- row_number 
-------------
+ key | value | other_value | ?column? 
+-----+-------+-------------+----------
 (0 rows)
 
 -- a little more complicated query tree
@@ -110,22 +110,22 @@ SELECT *
 FROM top_cte,
   (WITH cte_1 AS
      (SELECT *
-      FROM test_table) SELECT row_number() OVER ()
+      FROM test_table) SELECT *, (SELECT 1)
    FROM
      (SELECT *
       FROM cte_1) AS foo) AS bar;
 DEBUG:  CTE top_cte is going to be inlined via distributed planning
-DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query because the window function that is used cannot be pushed down
+DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query with subquery outside the FROM, WHERE and HAVING clauses
 DEBUG:  Router planner cannot handle multi-shard select queries
 DEBUG:  generating subplan 9_1 for CTE cte_1: SELECT key, value, other_value FROM cte_inline.test_table
 DEBUG:  Router planner cannot handle multi-shard select queries
 DEBUG:  Creating router plan
 DEBUG:  Plan is router executable
-DEBUG:  generating subplan 9_2 for subquery SELECT row_number() OVER () AS row_number FROM (SELECT cte_1.key, cte_1.value, cte_1.other_value FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('9_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1) foo
-DEBUG:  Plan 9 query after replacing subqueries and CTEs: SELECT top_cte.key, top_cte.value, top_cte.other_value, bar.row_number FROM (SELECT test_table.key, test_table.value, test_table.other_value FROM cte_inline.test_table) top_cte, (SELECT intermediate_result.row_number FROM read_intermediate_result('9_2'::text, 'binary'::citus_copy_format) intermediate_result(row_number bigint)) bar
+DEBUG:  generating subplan 9_2 for subquery SELECT key, value, other_value, (SELECT 1) FROM (SELECT cte_1.key, cte_1.value, cte_1.other_value FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('9_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1) foo
+DEBUG:  Plan 9 query after replacing subqueries and CTEs: SELECT top_cte.key, top_cte.value, top_cte.other_value, bar.key, bar.value, bar.other_value, bar."?column?" FROM (SELECT test_table.key, test_table.value, test_table.other_value FROM cte_inline.test_table) top_cte, (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value, intermediate_result."?column?" FROM read_intermediate_result('9_2'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb, "?column?" integer)) bar
 DEBUG:  Router planner cannot handle multi-shard select queries
- key | value | other_value | row_number 
------+-------+-------------+------------
+ key | value | other_value | key | value | other_value | ?column? 
+-----+-------+-------------+-----+-------+-------------+----------
 (0 rows)
 
 -- CTE is used inside a subquery in WHERE clause
@@ -136,21 +136,21 @@ WITH cte_1 AS
 SELECT count(*)
 FROM test_table
 WHERE KEY IN
-    (SELECT row_number() OVER () AS KEY
+    (SELECT (SELECT 1)
      FROM
        (SELECT *,
                random()
         FROM
           (SELECT *
            FROM cte_1) AS foo) AS bar);
-DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query because the window function that is used cannot be pushed down
+DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query with subquery outside the FROM, WHERE and HAVING clauses
 DEBUG:  Router planner cannot handle multi-shard select queries
 DEBUG:  generating subplan 12_1 for CTE cte_1: SELECT key, value, other_value FROM cte_inline.test_table
 DEBUG:  Router planner cannot handle multi-shard select queries
 DEBUG:  Creating router plan
 DEBUG:  Plan is router executable
-DEBUG:  generating subplan 12_2 for subquery SELECT row_number() OVER () AS key FROM (SELECT foo.key, foo.value, foo.other_value, random() AS random FROM (SELECT cte_1.key, cte_1.value, cte_1.other_value FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('12_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1) foo) bar
-DEBUG:  Plan 12 query after replacing subqueries and CTEs: SELECT count(*) AS count FROM cte_inline.test_table WHERE (key OPERATOR(pg_catalog.=) ANY (SELECT intermediate_result.key FROM read_intermediate_result('12_2'::text, 'binary'::citus_copy_format) intermediate_result(key bigint)))
+DEBUG:  generating subplan 12_2 for subquery SELECT (SELECT 1) FROM (SELECT foo.key, foo.value, foo.other_value, random() AS random FROM (SELECT cte_1.key, cte_1.value, cte_1.other_value FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('12_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1) foo) bar
+DEBUG:  Plan 12 query after replacing subqueries and CTEs: SELECT count(*) AS count FROM cte_inline.test_table WHERE (key OPERATOR(pg_catalog.=) ANY (SELECT intermediate_result."?column?" FROM read_intermediate_result('12_2'::text, 'binary'::citus_copy_format) intermediate_result("?column?" integer)))
 DEBUG:  Router planner cannot handle multi-shard select queries
  count 
 -------
@@ -163,18 +163,18 @@ DEBUG:  Router planner cannot handle multi-shard select queries
 WITH cte_1 AS
   (SELECT *
    FROM test_table)
-SELECT row_number() OVER () AS KEY  FROM (
+SELECT (SELECT 1) AS KEY  FROM (
   WITH cte_2 AS (SELECT *, random()
      FROM (SELECT *,random() FROM cte_1) as foo)
 SELECT *, random() FROM cte_2) as bar;
-DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query because the window function that is used cannot be pushed down
+DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query with subquery outside the FROM, WHERE and HAVING clauses
 DEBUG:  Router planner cannot handle multi-shard select queries
 DEBUG:  generating subplan 15_1 for CTE cte_1: SELECT key, value, other_value FROM cte_inline.test_table
 DEBUG:  Router planner cannot handle multi-shard select queries
 DEBUG:  generating subplan 15_2 for CTE cte_2: SELECT key, value, other_value, random, random() AS random FROM (SELECT cte_1.key, cte_1.value, cte_1.other_value, random() AS random FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('15_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1) foo
 DEBUG:  Creating router plan
 DEBUG:  Plan is router executable
-DEBUG:  Plan 15 query after replacing subqueries and CTEs: SELECT row_number() OVER () AS key FROM (SELECT cte_2.key, cte_2.value, cte_2.other_value, cte_2.random, cte_2.random_1 AS random, random() AS random FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value, intermediate_result.random, intermediate_result.random_1 AS random FROM read_intermediate_result('15_2'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb, random double precision, random_1 double precision)) cte_2(key, value, other_value, random, random_1)) bar(key, value, other_value, random, random_1, random_2)
+DEBUG:  Plan 15 query after replacing subqueries and CTEs: SELECT (SELECT 1) AS key FROM (SELECT cte_2.key, cte_2.value, cte_2.other_value, cte_2.random, cte_2.random_1 AS random, random() AS random FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value, intermediate_result.random, intermediate_result.random_1 AS random FROM read_intermediate_result('15_2'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb, random double precision, random_1 double precision)) cte_2(key, value, other_value, random, random_1)) bar(key, value, other_value, random, random_1, random_2)
 DEBUG:  Creating router plan
 DEBUG:  Plan is router executable
  key 
@@ -183,28 +183,28 @@ DEBUG:  Plan is router executable
 
 -- in this example, cte_2 can be inlined, because it is not used
 -- on any query that Citus cannot plan. However, cte_1 should not be
--- inlined, because it is used with an unsupported window function
+-- inlined, because it is used with a subquery in target list
 WITH cte_1 AS (SELECT * FROM test_table),
      cte_2 AS (select * from test_table)
 SELECT
 	*
 FROM
-	(SELECT *, row_number() OVER () FROM cte_1) as foo
+	(SELECT *, (SELECT 1) FROM cte_1) as foo
 		JOIN
 	cte_2
 		ON (true);
-DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query because the window function that is used cannot be pushed down
+DEBUG:  Skipped inlining the cte cte_1 because if inlined, Citus planner might error with: could not run distributed query with subquery outside the FROM, WHERE and HAVING clauses
 DEBUG:  CTE cte_2 is going to be inlined via distributed planning
 DEBUG:  Router planner cannot handle multi-shard select queries
 DEBUG:  generating subplan 18_1 for CTE cte_1: SELECT key, value, other_value FROM cte_inline.test_table
 DEBUG:  Router planner cannot handle multi-shard select queries
 DEBUG:  Creating router plan
 DEBUG:  Plan is router executable
-DEBUG:  generating subplan 18_2 for subquery SELECT key, value, other_value, row_number() OVER () AS row_number FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('18_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1
-DEBUG:  Plan 18 query after replacing subqueries and CTEs: SELECT foo.key, foo.value, foo.other_value, foo.row_number, cte_2.key, cte_2.value, cte_2.other_value FROM ((SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value, intermediate_result.row_number FROM read_intermediate_result('18_2'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb, row_number bigint)) foo JOIN (SELECT test_table.key, test_table.value, test_table.other_value FROM cte_inline.test_table) cte_2 ON (true))
+DEBUG:  generating subplan 18_2 for subquery SELECT key, value, other_value, (SELECT 1) FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('18_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1
+DEBUG:  Plan 18 query after replacing subqueries and CTEs: SELECT foo.key, foo.value, foo.other_value, foo."?column?", cte_2.key, cte_2.value, cte_2.other_value FROM ((SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value, intermediate_result."?column?" FROM read_intermediate_result('18_2'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb, "?column?" integer)) foo JOIN (SELECT test_table.key, test_table.value, test_table.other_value FROM cte_inline.test_table) cte_2 ON (true))
 DEBUG:  Router planner cannot handle multi-shard select queries
- key | value | other_value | row_number | key | value | other_value 
------+-------+-------------+------------+-----+-------+-------------
+ key | value | other_value | ?column? | key | value | other_value 
+-----+-------+-------------+----------+-----+-------+-------------
 (0 rows)
 
 -- unreferenced CTEs are just ignored
@@ -226,20 +226,20 @@ DETAIL:  distribution column value: 1
 -- router queries are affected by the distributed
 -- cte inlining. In this example, although it is
 -- a router query, Citus decides not to inline the CTE
--- because of the window function
-WITH a AS (SELECT * FROM test_table)
+-- because of the subquery in target list
+WITH a AS (SELECT * FROM test_table WHERE key = 1)
 SELECT
-	*, row_number() OVER ()
+	*, (SELECT 1)
 FROM
 	a
 WHERE
 	key = 1;
-DEBUG:  Skipped inlining the cte a because if inlined, Citus planner might error with: could not run distributed query because the window function that is used cannot be pushed down
+DEBUG:  Skipped inlining the cte a because if inlined, Citus planner might error with: could not run distributed query with subquery outside the FROM, WHERE and HAVING clauses
 DEBUG:  Creating router plan
 DEBUG:  Plan is router executable
 DETAIL:  distribution column value: 1
- key | value | other_value | row_number 
------+-------+-------------+------------
+ key | value | other_value | ?column? 
+-----+-------+-------------+----------
 (0 rows)
 
 -- router queries are affected by the distributed
@@ -597,13 +597,12 @@ DEBUG:  Plan is router executable
 -- update/delete/modifying ctes
 -- we don't support any cte inlining in modifications
 -- queries and modifying CTEs
-WITH cte_1 AS (SELECT * FROM test_table WHERE key > 1)
-	DELETE FROM test_table WHERE key IN (SELECT key FROM cte_1);
-DEBUG:  cannot push down this subquery
-DETAIL:  CTEs in subqueries are currently unsupported
-DEBUG:  generating subplan 53_1 for CTE cte_1: SELECT key, value, other_value FROM cte_inline.test_table WHERE (key OPERATOR(pg_catalog.>) 1)
+WITH cte_1 AS (SELECT * FROM test_table)
+	DELETE FROM test_table WHERE key NOT IN (SELECT key FROM cte_1);
+DEBUG:  complex joins are only supported when all distributed tables are joined on their distribution columns with equal operator
+DEBUG:  generating subplan 53_1 for CTE cte_1: SELECT key, value, other_value FROM cte_inline.test_table
 DEBUG:  Router planner cannot handle multi-shard select queries
-DEBUG:  Plan 53 query after replacing subqueries and CTEs: DELETE FROM cte_inline.test_table WHERE (key OPERATOR(pg_catalog.=) ANY (SELECT cte_1.key FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('53_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1))
+DEBUG:  Plan 53 query after replacing subqueries and CTEs: DELETE FROM cte_inline.test_table WHERE (NOT (key OPERATOR(pg_catalog.=) ANY (SELECT cte_1.key FROM (SELECT intermediate_result.key, intermediate_result.value, intermediate_result.other_value FROM read_intermediate_result('53_1'::text, 'binary'::citus_copy_format) intermediate_result(key integer, value text, other_value jsonb)) cte_1)))
 DEBUG:  Creating router plan
 DEBUG:  Plan is router executable
 -- we don't inline CTEs if they are modifying CTEs

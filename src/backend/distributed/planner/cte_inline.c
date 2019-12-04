@@ -248,6 +248,8 @@ CitusCTEInlineCondition(Query *query, CommonTableExpr *cte)
 	List *queryList = QueriesRelyOnCte(query, cte);
 	ListCell *queryCell = NULL;
 
+	/* the entry query always relies on the cte */
+	Assert(list_member(queryList, query));
 	foreach(queryCell, queryList)
 	{
 		Query *aQuery = (Query *) lfirst(queryCell);
